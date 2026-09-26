@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#111827" />
+  <title>دکوراسیون شرق | پنل ادمین</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">پنل مدیریت</div>
+        <h1>دکوراسیون شرق</h1>
+      </div>
+      <button class="primary" id="newContractBtn">+ قرارداد جدید</button>
+    </header>
+
+    <main id="appMain">
+      <section class="view active" data-view="home">
+        <div class="kpi-grid" id="kpiGrid"></div>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>قراردادهای نیازمند توجه</h2>
+            <span class="muted" id="attentionCount"></span>
+          </div>
+          <div id="attentionList" class="card-list"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head"><h2>نمودار پیشرفت پروژه‌های فعال</h2></div>
+          <div id="progressChart" class="progress-chart"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head"><h2>وضعیت قراردادها</h2></div>
+          <div class="status-chart-wrap">
+            <div id="statusDonut" class="status-donut"><div class="donut-center"><strong id="donutTotal">۰</strong><span>قرارداد</span></div></div>
+            <div id="statusLegend" class="status-legend"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>پروژه‌های فعال</h2>
+            <button class="text-btn" data-go="contracts">مشاهده همه</button>
+          </div>
+          <div id="activeProjects" class="contract-grid"></div>
+        </section>
+      </section>
+
+      <section class="view" data-view="contracts">
+        <div class="section-head sticky-title"><h2>قراردادها</h2></div>
+        <section class="panel filter-panel">
+          <div class="filter-grid">
+            <label>نام مشتری
+              <input id="filterCustomer" type="search" placeholder="جستجو..." />
+            </label>
+            <label>از تاریخ عقد
+              <input id="filterFrom" type="text" inputmode="numeric" placeholder="۱۴۰۵/۰۷/۰۱" />
+            </label>
+            <label>تا تاریخ عقد
+              <input id="filterTo" type="text" inputmode="numeric" placeholder="۱۴۰۵/۱۲/۲۹" />
+            </label>
+            <label>وضعیت
+              <select id="filterStatus">
+                <option value="">همه</option>
+                <option value="active">فعال</option>
+                <option value="stopped">متوقف</option>
+                <option value="terminated">فسخ‌شده</option>
+                <option value="completed">خاتمه‌یافته</option>
+              </select>
+            </label>
+          </div>
+          <button id="clearFilters" class="secondary">پاک کردن فیلترها</button>
+        </section>
+        <div id="contractsList" class="contract-grid"></div>
+      </section>
+
+      <section class="view" data-view="library">
+        <div class="section-head sticky-title">
+          <div>
+            <h2>کتابخانه فعالیت‌ها</h2>
+            <p class="muted small">ضریب = ۴۰٪ حجم کار + ۳۵٪ هزینه + ۲۵٪ مدت</p>
+          </div>
+          <button id="addCategoryBtn" class="primary">+ دسته</button>
+        </div>
+        <div id="libraryList" class="library-list"></div>
+      </section>
+
+      <section class="view" data-view="more">
+        <section class="panel more-list">
+          <button class="menu-row" data-go="library"><span>کتابخانه فعالیت‌ها</span><span>←</span></button>
+          <div class="menu-row disabled"><span>تنظیمات</span><span class="muted">بعداً</span></div>
+          <div class="menu-row disabled"><span>کاربران و دسترسی‌ها</span><span class="muted">بعداً</span></div>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-nav="home"><span>⌂</span><small>خانه</small></button>
+      <button class="nav-item" data-nav="contracts"><span>▤</span><small>قراردادها</small></button>
+      <button class="nav-item" data-nav="library"><span>▦</span><small>کتابخانه</small></button>
+      <button class="nav-item" data-nav="more"><span>•••</span><small>بیشتر</small></button>
+    </nav>
+  </div>
+
+  <div class="modal" id="contractModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-modal></div>
+    <div class="modal-card large">
+      <div class="modal-head">
+        <h3 id="contractModalTitle">قرارداد جدید</h3>
+        <button class="icon-btn" data-close-modal>×</button>
+      </div>
+      <form id="contractForm" class="form-grid">
+        <input type="hidden" id="contractId" />
+        <label>نام مشتری<input id="customerName" required /></label>
+        <label>کد قلم<input id="penCode" required /></label>
+        <label>مبلغ قرارداد<input id="contractAmount" inputmode="numeric" required placeholder="مثلاً 850000000" /></label>
+        <label>تاریخ عقد قرارداد<input id="contractDate" inputmode="numeric" required placeholder="۱۴۰۵/۰۷/۰۱" /></label>
+        <label>تاریخ پایان قرارداد<input id="endDate" inputmode="numeric" required placeholder="۱۴۰۵/۰۸/۳۰" /></label>
+        <label>تاریخ جبرانی<input id="compDate" inputmode="numeric" placeholder="اختیاری" /></label>
+        <label class="full">توضیحات (اختیاری)<textarea id="contractNotes" rows="3"></textarea></label>
+        <div class="form-actions full">
+          <button type="button" class="secondary" data-close-modal>انصراف</button>
+          <button type="submit" class="primary">ذخیره قرارداد</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="modal" id="detailModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-detail></div>
+    <div class="modal-card xlarge">
+      <div class="modal-head">
+        <div>
+          <h3 id="detailTitle"></h3>
+          <p id="detailSubtitle" class="muted small"></p>
+        </div>
+        <button class="icon-btn" data-close-detail>×</button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <div class="modal" id="promptModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-prompt></div>
+    <div class="modal-card">
+      <div class="modal-head"><h3 id="promptTitle">ویرایش</h3><button class="icon-btn" data-close-prompt>×</button></div>
+      <div id="promptBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
