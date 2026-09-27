@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.5.0";
+const APP_VERSION="15.6.0";
 
 let auth=null;
 let db=null;
@@ -982,13 +982,15 @@ function renderHome(){
   const near=all.filter(c=>dueState(c).key==='near').sort(contractEndSort);
   const critical=all.filter(c=>['critical','overdue'].includes(dueState(c).key)).sort(contractEndSort);
   const completed=all.filter(c=>effectiveContractStatus(c)==='completed');
+  const pendingStart=all.filter(c=>effectiveContractStatus(c)==='pendingStart');
   const avg=unfinished.length?+(unfinished.reduce((sum,c)=>sum+contractProgress(c),0)/unfinished.length).toFixed(1):0;
   document.getElementById('kpiGrid').innerHTML=[
     ['کل قراردادها',all.length,'blue','total'],
+    ['در انتظار شروع',pendingStart.length,'slate','pendingStart'],
     ['نزدیک سررسید',near.length,'orange','near'],
     ['بحرانی',critical.length,'red','critical'],
     ['خاتمه‌یافته',completed.length,'green','completed'],
-    ['میانگین پیشرفت',`${avg}٪`,'','progress']
+    ['میانگین پیشرفت',`${avg}٪`,'primaryTone','progress']
   ].map(([l,v,cl,key])=>`<div class="kpi ${cl}" data-kpi="${key}"><div class="label">${l}</div><div class="value">${toFa(v)}</div></div>`).join('');
 
   const stopped=all.filter(c=>effectiveContractStatus(c)==='stopped');
@@ -996,7 +998,7 @@ function renderHome(){
     .filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i)
     .sort(contractEndSort);
   document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';
-  document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="small muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}پیشرفت ${toFa(contractProgress(c))}٪</div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
+  document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="attention-progress muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}<span>پیشرفت ${toFa(contractProgress(c))}٪</span></div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
 
   renderCharts(unfinished);
 }
@@ -1660,7 +1662,7 @@ function openPanelsModal(){if(!isAdminRole())return;openModal('panelsModal')}
 function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=role==='siteSupervisor'?'siteSupervisor':'';configureRoleUi();closeModal('panelsModal');switchView('home');renderAll()}
 function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
-document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');filterStatus.value=kpi.dataset.kpi==='completed'?'completed':'';renderContracts()}});
+document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');filterStatus.value=kpi.dataset.kpi==='completed'?'completed':kpi.dataset.kpi==='pendingStart'?'pendingStart':'';renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole())openContractForm()};
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
 bindJalaliDateInputs();
