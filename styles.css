@@ -247,3 +247,66 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
   .progress-editor-v2 input{width:56px!important;max-width:56px!important;min-width:56px!important}
   .activity-meta-v2{gap:5px}
 }
+
+/* v14 site supervisor panel */
+.role-supervisor #newContractBtn,
+.role-supervisor [data-nav="library"],
+.role-supervisor [data-view="library"],
+.role-supervisor [data-go="library"],
+.role-supervisor #openUsersBtn,
+.role-supervisor #openBackupBtn,
+.role-supervisor .more-list>.menu-row.disabled{display:none!important}
+.role-supervisor .bottom-nav{grid-template-columns:repeat(3,1fr)}
+.role-supervisor .more-list{gap:8px}
+.role-supervisor .contract-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.supervisor-contract-card{cursor:pointer;padding:12px 13px}
+.supervisor-contract-card .contract-top{align-items:flex-start}
+.supervisor-card-status{font-size:11px;font-weight:800;padding:5px 8px;border-radius:999px;background:#f3f4f6;color:#475467;white-space:nowrap}
+.supervisor-contract-due{display:flex;margin-top:8px;max-width:100%;width:max-content;font-size:11px;line-height:1.55}
+.supervisor-progress-row{margin:9px 0 7px}
+.supervisor-card-foot{display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--muted);font-size:10.5px;border-top:1px dashed var(--line);padding-top:7px;margin-top:4px}
+.supervisor-detail-tools{display:flex;justify-content:flex-start;margin:0 0 8px}
+.supervisor-detail-tools .history-toggle-btn{padding:8px 10px;font-size:11px}
+.supervisor-activities-panel{overflow:hidden;min-width:0;padding:10px!important}
+.supervisor-activities-panel>.section-head{margin-bottom:8px}
+.supervisor-activity-list{display:grid;gap:8px;min-width:0}
+.supervisor-activity-row{width:100%;min-width:0;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--panel);display:grid;gap:8px;overflow:hidden}
+.supervisor-activity-row.done{opacity:.68;background:#fbfcfb}
+.supervisor-activity-title{min-width:0;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.supervisor-activity-title strong{min-width:0;display:block;font-size:14px;line-height:1.5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.supervisor-activity-title span{font-size:10px;color:var(--muted);white-space:nowrap;flex:none}
+.supervisor-activity-row.done .supervisor-activity-title strong{text-decoration:line-through;text-decoration-thickness:1px;text-decoration-color:rgba(100,116,139,.55);color:var(--muted)}
+.supervisor-activity-controls{display:flex;justify-content:space-between;align-items:center;gap:8px;min-width:0}
+.supervisor-progress-editor{display:flex;align-items:center;gap:4px;direction:rtl;min-width:0}
+.supervisor-progress-editor input{width:64px!important;min-width:64px!important;max-width:64px!important;height:36px;min-height:36px;padding:5px 6px;text-align:center;font-size:15px;border-radius:9px}
+.supervisor-progress-editor>span{font-size:12px;font-weight:800}
+.supervisor-activity-controls>.done-act-v2{margin-right:auto;min-height:34px;padding:5px 9px;font-size:10px;white-space:nowrap}
+.contract-history-panel{border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:9px;background:#fbfcfd}
+.contract-history-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
+.contract-history-head span{color:var(--muted);font-size:10px}
+.history-loading{padding:12px;text-align:center;color:var(--muted);font-size:11px}
+.contract-history-entry{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:8px 0;border-top:1px dashed var(--line)}
+.contract-history-entry:first-of-type{border-top:0}
+.history-entry-main{min-width:0}
+.history-entry-main>strong{font-size:12px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-progress-change{display:flex;align-items:center;gap:5px;margin-top:4px;font-size:11px}
+.history-progress-change b{color:var(--muted);font-weight:500}
+.history-progress-change em{font-style:normal;font-size:9px;padding:3px 6px;border-radius:999px;background:#ecfdf5;color:#047857;margin-right:4px}
+.history-entry-meta{display:grid;justify-items:end;gap:2px;color:var(--muted);font-size:9.5px;white-space:nowrap}
+:root[data-theme="dark"] .supervisor-card-status{background:#232326;color:#d4d4d8}
+:root[data-theme="dark"] .supervisor-activity-row{background:var(--panel)}
+:root[data-theme="dark"] .supervisor-activity-row.done{background:#111214}
+:root[data-theme="dark"] .contract-history-panel{background:#101012;border-color:var(--line)}
+@media(max-width:820px){.role-supervisor .contract-grid{grid-template-columns:1fr}}
+@media(max-width:560px){
+  .role-supervisor .panel-badge{max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .supervisor-contract-card{padding:10px 11px}
+  .supervisor-contract-due{font-size:10px}
+  .supervisor-card-foot{font-size:9.5px}
+  .supervisor-activity-row{padding:9px;gap:7px}
+  .supervisor-activity-title strong{font-size:13px}
+  .supervisor-activity-title span{font-size:9px}
+  .supervisor-progress-editor input{width:58px!important;min-width:58px!important;max-width:58px!important;height:34px;min-height:34px;font-size:14px}
+  .contract-history-entry{grid-template-columns:1fr;gap:5px}
+  .history-entry-meta{display:flex;justify-content:flex-start;gap:7px;flex-wrap:wrap}
+}

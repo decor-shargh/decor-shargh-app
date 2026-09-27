@@ -1,15 +1,15 @@
-const CACHE_NAME = 'decor-shargh-v13-3-20260927-contract-detail-ux';
+const CACHE_NAME = 'decor-shargh-v14-20260927-site-supervisor-quick-update-history';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=133',
-  './app.js?v=133',
-  './manifest.webmanifest?v=133',
-  './brand-logo.png?v=133',
-  './brand-mark.png?v=133',
-  './icon-192.png?v=133',
-  './icon-512.png?v=133',
-  './apple-touch-icon.png?v=133',
+  './styles.css?v=14',
+  './app.js?v=14',
+  './manifest.webmanifest?v=14',
+  './brand-logo.png?v=14',
+  './brand-mark.png?v=14',
+  './icon-192.png?v=14',
+  './icon-512.png?v=14',
+  './apple-touch-icon.png?v=14',
   './version.json'
 ];
 

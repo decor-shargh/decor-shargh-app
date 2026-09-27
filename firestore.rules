@@ -7,11 +7,23 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActiveRole(roleName) {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+        && userProfile().active == true
+        && userProfile().role == roleName;
+    }
+
+    function isAdmin() {
+      return isActiveRole("admin");
+    }
+
+    function isSiteSupervisor() {
+      return isActiveRole("siteSupervisor");
     }
 
     match /users/{userId} {
@@ -29,7 +41,44 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // اطلاعات کاری اپ فقط برای Admin فعال این نسخه قابل دسترسی است.
+    match /contracts/{contractId} {
+      // Admin و سرپرست اجرای فعال قراردادها را می‌بینند.
+      allow read: if isAdmin() || isSiteSupervisor();
+
+      // ساخت و حذف قرارداد فقط برای Admin است.
+      allow create, delete: if isAdmin();
+
+      // Admin ویرایش کامل دارد. سرپرست اجرا فقط فیلدهای مربوط به پیشرفت و
+      // تکمیل خودکار قرارداد را می‌تواند تغییر دهد؛ ساختار فعالیت‌ها دست‌نخورده می‌ماند.
+      allow update: if isAdmin() || (
+        isSiteSupervisor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'progressByActivity',
+          'status',
+          'completedAt',
+          'updatedAt',
+          'updatedBy',
+          'appVersion'
+        ])
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.progressByActivity is map
+        && (request.resource.data.status == resource.data.status || request.resource.data.status in ['active', 'completed'])
+      );
+
+      match /history/{historyId} {
+        // تاریخچه فقط در صورت درخواست خوانده می‌شود و برای Admin/سرپرست اجرا قابل مشاهده است.
+        allow read: if isAdmin() || isSiteSupervisor();
+
+        // رکورد تاریخچه فقط توسط همان کاربر فعال ایجاد می‌شود و immutable است.
+        allow create: if (isAdmin() || isSiteSupervisor())
+          && request.resource.data.contractId == contractId
+          && request.resource.data.changedByUid == request.auth.uid;
+
+        allow update, delete: if isAdmin();
+      }
+    }
+
+    // سایر اطلاعات کاری همچنان فقط برای Admin فعال قابل دسترسی است.
     match /{document=**} {
       allow read, write: if isAdmin();
     }
