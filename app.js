@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="10.0.0";
+const APP_VERSION="11.0.0";
 
 let auth=null;
 let db=null;
@@ -597,10 +597,20 @@ async function createContractRemote(data){
   return ref.id;
 }
 async function updateContractRemote(id,patch){
+  if(!db||!currentAdmin)throw Object.assign(new Error('firestore-not-ready'),{code:'unavailable'});
   const current=getContract(id)||{};
   const merged={...current,...patch,id};
   const payload=contractDocPayload(merged);
-  await db.collection(CONTRACT_COLLECTION).doc(id).set({...payload,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin?.uid||''},{merge:true});
+  const ref=db.collection(CONTRACT_COLLECTION).doc(id);
+  await ref.set({...payload,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||''},{merge:true});
+  // Read-after-write verification + immediate local refresh. This prevents the edit modal
+  // from closing while the cards still show the stale pre-edit snapshot.
+  const check=await ref.get();
+  if(!check.exists)throw Object.assign(new Error('firestore-update-not-confirmed'),{code:'unavailable'});
+  const saved={id:check.id,...check.data()};
+  const idx=state.contracts.findIndex(c=>c.id===id);
+  if(idx>=0)state.contracts[idx]=saved;else state.contracts.push(saved);
+  return saved;
 }
 async function persistContract(c){
   syncAutoCompleted(c);
@@ -617,8 +627,45 @@ function g2d(gy,gm,gd){let d=div((gy+div(gm-8,6)+100100)*1461,4)+div(153*((gm+9)
 function d2g(jdn){let j=4*jdn+139361631;j=j+div(div(4*jdn+183187720,146097)*3,4)*4-3908;const i=div((j%1461),4)*5+308;const gd=div(i%153,5)+1;const gm=(div(i,153)%12)+1;const gy=div(j,1461)-100100+div(8-gm,6);return {gy,gm,gd}}
 function j2d(jy,jm,jd){const r=jalCal(jy);return g2d(r.gy,3,r.march)+(jm-1)*31-div(jm,7)*(jm-7)+jd-1}
 function jalaliToDate(s){const n=normalizeDate(s);if(!n)return null;const [jy,jm,jd]=n.split('/').map(Number);try{const g=d2g(j2d(jy,jm,jd));return new Date(g.gy,g.gm-1,g.gd,12,0,0)}catch{return null}}
-function daysUntilContract(c){const ref=c.compDate||c.endDate;const d=jalaliToDate(ref);if(!d)return null;const t=new Date();const today=new Date(t.getFullYear(),t.getMonth(),t.getDate(),12);return Math.ceil((d-today)/86400000)}
-function dueState(c){if(c.status==='completed')return {key:'completed',text:'خاتمه‌یافته'};if(c.status==='stopped')return {key:'stopped',text:'متوقف'};if(c.status==='terminated')return {key:'terminated',text:'فسخ‌شده'};const n=daysUntilContract(c);if(n===null)return {key:'normal',text:'بدون تاریخ معتبر'};if(n<0)return {key:'overdue',text:`${toFa(Math.abs(n))} روز از سررسید گذشته`};if(n<=3)return {key:'critical',text:n===0?'امروز سررسید':`${toFa(n)} روز تا سررسید`};if(n<=7)return {key:'near',text:`${toFa(n)} روز تا سررسید`};return {key:'normal',text:`${toFa(n)} روز تا سررسید`}}
+function daysUntilDate(dateStr){
+  const d=jalaliToDate(dateStr);if(!d)return null;
+  const t=new Date();const today=new Date(t.getFullYear(),t.getMonth(),t.getDate(),12);
+  return Math.ceil((d-today)/86400000);
+}
+function daysUntilContract(c){return daysUntilDate(c.endDate)}
+function duePhrase(n,label){
+  if(n===null)return `${label}: تاریخ نامعتبر`;
+  if(n<0)return `${label}: ${toFa(Math.abs(n))} روز گذشته`;
+  if(n===0)return `${label}: امروز`;
+  return `${label}: ${toFa(n)} روز مانده`;
+}
+function dueState(c){
+  if(c.status==='completed')return {key:'completed',text:'خاتمه‌یافته'};
+  if(c.status==='stopped')return {key:'stopped',text:'متوقف'};
+  if(c.status==='terminated')return {key:'terminated',text:'فسخ‌شده'};
+  const original=daysUntilDate(c.endDate);
+  if(original===null)return {key:'normal',text:'بدون تاریخ معتبر'};
+  const revised=c.compDate?daysUntilDate(c.compDate):null;
+  let key='normal';
+  // The original contractual due date remains the criticality baseline even when a
+  // compensatory/revised date exists. Once the original due date is passed, the
+  // contract is critical until it is completed/stopped/terminated.
+  if(original<0)key='overdue';
+  else if(original<=3)key='critical';
+  else if(original<=7)key='near';
+  if(c.compDate){
+    const originalText=original<0
+      ? `${toFa(Math.abs(original))} روز تأخیر نسبت به پایان قرارداد`
+      : original===0?'امروز تاریخ پایان قرارداد':`${toFa(original)} روز تا پایان قرارداد`;
+    const revisedText=revised===null?'تاریخ جبرانی نامعتبر':revised<0
+      ? `${toFa(Math.abs(revised))} روز از تاریخ جبرانی گذشته`
+      : revised===0?'امروز تاریخ جبرانی':`${toFa(revised)} روز تا تاریخ جبرانی`;
+    return {key,text:`${originalText} | ${revisedText}`,originalDays:original,revisedDays:revised};
+  }
+  if(original<0)return {key,text:`${toFa(Math.abs(original))} روز از سررسید گذشته`,originalDays:original};
+  if(original===0)return {key,text:'امروز سررسید',originalDays:original};
+  return {key,text:`${toFa(original)} روز تا سررسید`,originalDays:original};
+}
 function contractProgress(c){if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+((Number(a.progress)||0)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
 function activityWeight(c,a){const total=c.activities.reduce((s,x)=>s+(Number(x.baseScore)||0),0);return total?+(a.baseScore/total*100).toFixed(1):0}
 function syncAutoCompleted(c){if(c.activities?.length&&c.activities.every(a=>Number(a.progress)===100)){c.status='completed';c.completedAt=new Date().toISOString()}else if(c.status==='completed'){c.status='active';delete c.completedAt}}
@@ -933,7 +980,42 @@ function openBackupModal(){
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>openContractForm();
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
-document.getElementById('contractForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim(),activities:contractFormActivities.map(a=>({...a}))};if(!data.contractDate||!data.endDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}try{const id=contractId.value;if(id){await updateContractRemote(id,data);toast('قرارداد در Firestore ویرایش شد')}else{await createContractRemote(data);toast('قرارداد آنلاین در Firestore ثبت شد')}closeModal('contractModal');switchView('contracts')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}};
+document.getElementById('contractForm').onsubmit=async e=>{
+  e.preventDefault();
+  const btn=e.submitter||document.querySelector('#contractForm button[type="submit"]');
+  if(btn)btn.disabled=true;
+  const $=id=>document.getElementById(id);
+  const rawComp=$('compDate').value.trim();
+  const data={
+    customerName:$('customerName').value.trim(),
+    penCode:$('penCode').value.trim(),
+    amount:toEn($('contractAmount').value).replace(/,/g,''),
+    contractDate:normalizeDate($('contractDate').value),
+    endDate:normalizeDate($('endDate').value),
+    compDate:normalizeDate(rawComp),
+    notes:$('contractNotes').value.trim(),
+    activities:contractFormActivities.map(a=>({...a}))
+  };
+  if(!data.customerName||!data.penCode||!data.amount){if(btn)btn.disabled=false;return toast('نام مشتری، کد قلم و مبلغ قرارداد الزامی است')}
+  if(!data.contractDate||!data.endDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}
+  if(rawComp&&!data.compDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ جبرانی را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}
+  try{
+    const id=$('contractId').value.trim();
+    if(id){
+      await updateContractRemote(id,data);
+      renderAll();
+      toast('اطلاعات قرارداد با موفقیت ویرایش شد');
+    }else{
+      await createContractRemote(data);
+      toast('قرارداد آنلاین در Firestore ثبت شد');
+    }
+    closeModal('contractModal');
+    switchView('contracts');
+  }catch(err){
+    toast(firestoreErrorMessage(err));
+    if(btn)btn.disabled=false;
+  }
+};
 ['filterCustomer','filterFrom','filterTo','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterFrom.value='';filterTo.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);

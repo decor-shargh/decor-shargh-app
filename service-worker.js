@@ -1,15 +1,15 @@
-const CACHE_NAME = 'decor-shargh-v10-20260927-users-darkfix';
+const CACHE_NAME = 'decor-shargh-v11-20260927-contract-edit-duefix';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=10',
-  './app.js?v=10',
-  './manifest.webmanifest?v=10',
-  './brand-logo.png?v=10',
-  './brand-mark.png?v=10',
-  './icon-192.png?v=10',
-  './icon-512.png?v=10',
-  './apple-touch-icon.png?v=10',
+  './styles.css?v=11',
+  './app.js?v=11',
+  './manifest.webmanifest?v=11',
+  './brand-logo.png?v=11',
+  './brand-mark.png?v=11',
+  './icon-192.png?v=11',
+  './icon-512.png?v=11',
+  './apple-touch-icon.png?v=11',
   './version.json'
 ];
 
