@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.2.0";
+const APP_VERSION="15.3.0";
 
 let auth=null;
 let db=null;
@@ -32,6 +32,7 @@ let contractsReady=false;
 let contractsUnsub=null;
 let contractFormActivities=[];
 let contractFormSelectedLibraryActivity=null;
+let contractFormSaving=false;
 
 let authResolved=false;
 let deferredInstallPrompt=null;
@@ -731,10 +732,45 @@ async function createContractRemote(data){
   if(!db||!currentAdmin||!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
   const ref=db.collection(CONTRACT_COLLECTION).doc();
   const payload=contractDocPayload({...data,id:ref.id,status:'active'});
-  await ref.set({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:currentAdmin.uid,appVersion:APP_VERSION});
-  // Read-after-write verification: do not tell the user it saved unless Firestore can read it back.
-  const check=await ref.get();
-  if(!check.exists)throw Object.assign(new Error('firestore-write-not-confirmed'),{code:'unavailable'});
+  const nowIso=new Date().toISOString();
+  const optimistic={id:ref.id,...payload,createdAtClient:nowIso,updatedAtClient:nowIso,createdBy:currentAdmin.uid,appVersion:APP_VERSION,_pendingWrite:true};
+
+  // Optimistic/local-first create: add the contract to UI immediately. Firestore persistence
+  // queues the write when offline and syncs it automatically after connectivity returns.
+  const existingIndex=state.contracts.findIndex(c=>c.id===ref.id);
+  if(existingIndex>=0)state.contracts[existingIndex]=optimistic;else state.contracts.unshift(optimistic);
+  contractsReady=true;
+  if(appStarted)scheduleContractViewsRender();
+
+  let writePromise;
+  try{
+    writePromise=ref.set({
+      ...payload,
+      createdAt:firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      createdAtClient:nowIso,
+      updatedAtClient:nowIso,
+      createdBy:currentAdmin.uid,
+      appVersion:APP_VERSION
+    });
+  }catch(err){
+    state.contracts=state.contracts.filter(c=>c.id!==ref.id);
+    if(appStarted)scheduleContractViewsRender();
+    throw err;
+  }
+
+  // Do not block the Save button waiting for a server round-trip. On a real reject, roll back
+  // the optimistic card and tell the user. Offline writes remain queued by Firestore.
+  writePromise.then(()=>{
+    const local=getContract(ref.id);
+    if(local)delete local._pendingWrite;
+  }).catch(err=>{
+    const local=getContract(ref.id);
+    if(local?._pendingWrite)state.contracts=state.contracts.filter(c=>c.id!==ref.id);
+    if(appStarted)scheduleContractViewsRender();
+    toast(`ذخیره قرارداد انجام نشد: ${firestoreErrorMessage(err)}`);
+  });
+
   return ref.id;
 }
 async function updateContractRemote(id,patch){
@@ -929,7 +965,7 @@ function renderHome(){const active=activeContracts();const near=active.filter(c=
 function renderCharts(active){const pc=document.getElementById('progressChart');pc.innerHTML=active.length?active.map(c=>{const p=contractProgress(c);return `<div class="bar-row"><div class="small">${escapeHtml(c.customerName)}</div><div class="bar-bg"><div class="bar" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>`}).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
  const counts={active:0,near:0,critical:0,stopped:0};state.contracts.forEach(c=>{if(c.status==='stopped')counts.stopped++;else if(c.status==='active'){const d=dueState(c).key;if(d==='near')counts.near++;else if(d==='critical'||d==='overdue')counts.critical++;else counts.active++;}});const total=Object.values(counts).reduce((a,b)=>a+b,0);document.getElementById('donutTotal').textContent=toFa(total);const colors=['#2563eb','#f59e0b','#dc2626','#6b7280'];let acc=0,parts=[];Object.values(counts).forEach((v,i)=>{const start=total?acc/total*100:0;acc+=v;const end=total?acc/total*100:100;parts.push(`${colors[i]} ${start}% ${end}%`)});document.getElementById('statusDonut').style.background=total?`conic-gradient(${parts.join(',')})`:'#e5e7eb';const labels=[['فعال',counts.active],['نزدیک سررسید',counts.near],['بحرانی',counts.critical],['متوقف',counts.stopped]];document.getElementById('statusLegend').innerHTML=labels.map((x,i)=>`<div class="legend-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colors[i]};margin-left:7px"></span>${x[0]}</span><strong>${toFa(x[1])}</strong></div>`).join('')}
 
-function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDate(b.contractDate)||0)-(jalaliToDate(a.contractDate)||0));const name=document.getElementById('filterCustomer').value.trim();const year=normalizeYear(document.getElementById('filterYear').value);const month=document.getElementById('filterMonth').value;const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));if(st)arr=arr.filter(c=>c.status===st);if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
+function renderContracts(){let arr=[...state.contracts].sort((a,b)=>{const ad=jalaliToDate(a.endDate),bd=jalaliToDate(b.endDate);const at=ad?ad.getTime():Number.POSITIVE_INFINITY,bt=bd?bd.getTime():Number.POSITIVE_INFINITY;if(at!==bt)return at-bt;const ac=jalaliToDate(a.contractDate),bc=jalaliToDate(b.contractDate);return (bc?bc.getTime():0)-(ac?ac.getTime():0)});const name=document.getElementById('filterCustomer').value.trim();const year=normalizeYear(document.getElementById('filterYear').value);const month=document.getElementById('filterMonth').value;const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));if(st)arr=arr.filter(c=>c.status===st);if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
 
 function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>{const expanded=libraryExpandedCats.has(cat.id);const body=cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty compact-empty">فعالیتی در این دسته نیست.</div>';return `<section class="category-card ${expanded?'open':''}"><div class="category-head"><button class="category-toggle" type="button" data-lib-toggle="${cat.id}" aria-expanded="${expanded?'true':'false'}"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><span class="category-chevron">${expanded?'▾':'▸'}</span></button><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div><div class="category-body ${expanded?'':'is-hidden'}">${body}</div></section>`}).join('')}
 
@@ -1505,8 +1541,12 @@ bindJalaliDateInputs();
 
 document.getElementById('contractForm').onsubmit=async e=>{
   e.preventDefault();
+  if(contractFormSaving)return;
   const btn=e.submitter||document.querySelector('#contractForm button[type="submit"]');
-  if(btn)btn.disabled=true;
+  const originalBtnText=btn?.textContent||'ذخیره قرارداد';
+  contractFormSaving=true;
+  if(btn){btn.disabled=true;btn.textContent='در حال ذخیره...';btn.setAttribute('aria-busy','true')}
+  const finishSaving=()=>{contractFormSaving=false;if(btn){btn.disabled=false;btn.textContent=originalBtnText;btn.removeAttribute('aria-busy')}};
   const $=id=>document.getElementById(id);
   const rawComp=$('compDate').value.trim();
   const data={
@@ -1519,11 +1559,11 @@ document.getElementById('contractForm').onsubmit=async e=>{
     notes:$('contractNotes').value.trim(),
     activities:contractFormActivities.map(a=>({...a}))
   };
-  if(!data.customerName){if(btn)btn.disabled=false;return toast('نام مشتری الزامی است')}
-  if(!data.contractDate){if(btn)btn.disabled=false;return toast('تاریخ عقد قرارداد را مثل ۱۴۰۵۰۷۰۱ یا ۱۴۰۵/۰۷/۰۱ وارد کنید')}
+  if(!data.customerName){finishSaving();return toast('نام مشتری الزامی است')}
+  if(!data.contractDate){finishSaving();return toast('تاریخ عقد قرارداد را مثل ۱۴۰۵۰۷۰۱ یا ۱۴۰۵/۰۷/۰۱ وارد کنید')}
   const rawEnd=$('endDate').value.trim();
-  if(rawEnd&&!data.endDate){if(btn)btn.disabled=false;return toast('تاریخ پایان قرارداد نامعتبر است')}
-  if(rawComp&&!data.compDate){if(btn)btn.disabled=false;return toast('تاریخ جبرانی نامعتبر است')}
+  if(rawEnd&&!data.endDate){finishSaving();return toast('تاریخ پایان قرارداد نامعتبر است')}
+  if(rawComp&&!data.compDate){finishSaving();return toast('تاریخ جبرانی نامعتبر است')}
   try{
     const id=$('contractId').value.trim();
     if(id){
@@ -1532,18 +1572,25 @@ document.getElementById('contractForm').onsubmit=async e=>{
       auditContractEdited(before,saved);
       scheduleContractViewsRender();
       toast('اطلاعات قرارداد با موفقیت ویرایش شد');
+      closeModal('contractModal');
+      switchView('contracts');
+      finishSaving();
     }else{
+      // New contracts are saved local-first. This returns immediately after the Firestore write
+      // is queued, so one tap is enough even on a slow or temporarily offline connection.
       const newId=await createContractRemote(data);
       auditContractCreated({id:newId,...data});
-      toast('قرارداد آنلاین در Firestore ثبت شد');
+      closeModal('contractModal');
+      switchView('contracts');
+      finishSaving();
+      toast(navigator.onLine?'قرارداد ثبت شد':'قرارداد ذخیره شد؛ پس از اتصال اینترنت همگام می‌شود');
     }
-    closeModal('contractModal');
-    switchView('contracts');
   }catch(err){
+    finishSaving();
     toast(firestoreErrorMessage(err));
-    if(btn)btn.disabled=false;
   }
-};
+}
+
 ['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(id==='filterMonth'?'change':'input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
