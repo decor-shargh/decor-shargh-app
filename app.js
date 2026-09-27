@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="9.0.0";
+const APP_VERSION="10.0.0";
 
 let auth=null;
 let db=null;
@@ -18,6 +18,7 @@ let profileUnsub=null;
 let signupInProgress=false;
 let profileCreationPromise=null;
 let usersAdminCache=[];
+let usersAdminRawCache=[];
 let pendingRememberIntent=null;
 const REMEMBERED_LOGIN_STORAGE_KEY='decor-shargh-remembered-login-v2';
 const REMEMBERED_LOGIN_DB='decor-shargh-secure-login';
@@ -744,6 +745,42 @@ function libraryPrompt(cat=null,act=null){
 }
 
 
+function normalizeUserEmail(email){return String(email||'').trim().toLowerCase();}
+function userState(u){
+  if(u.role==='blocked'||u.blocked===true)return 'blocked';
+  if(u.role==='pending'||u.active!==true)return 'pending';
+  return 'active';
+}
+function groupUsersByEmail(rows){
+  const groups=new Map();
+  rows.forEach(u=>{
+    if(u.hidden===true)return;
+    const key=normalizeUserEmail(u.email)||('__uid__'+u.id);
+    if(!groups.has(key))groups.set(key,[]);
+    groups.get(key).push(u);
+  });
+  return [...groups.values()].map(group=>{
+    // یک ایمیل فقط یک بار نمایش داده می‌شود. اولویت با سند UID فعلی، سپس حساب فعال، مسدود و pending است.
+    const self=group.find(x=>x.id===currentAdmin?.uid);
+    const active=group.find(x=>userState(x)==='active');
+    const blocked=group.find(x=>userState(x)==='blocked');
+    const pending=group.find(x=>userState(x)==='pending');
+    const base=self||active||blocked||pending||group[0];
+    const chosenState=active?'active':blocked?'blocked':'pending';
+    const source=chosenState==='active'?active:(chosenState==='blocked'?blocked:pending)||base;
+    return {...base,...source,id:base.id,email:source?.email||base.email||'',_docIds:group.map(x=>x.id),_duplicateCount:group.length,_state:chosenState};
+  }).sort((a,b)=>{
+    const ap=a._state==='pending'?0:a._state==='active'?1:2,bp=b._state==='pending'?0:b._state==='active'?1:2;
+    return ap-bp||normalizeUserEmail(a.email).localeCompare(normalizeUserEmail(b.email));
+  });
+}
+async function updateUserGroup(u,payload){
+  const ids=(u?._docIds?.length?u._docIds:[u?.id]).filter(Boolean);
+  if(!ids.length)return;
+  const batch=db.batch();
+  ids.forEach(id=>batch.set(db.collection('users').doc(id),payload,{merge:true}));
+  await batch.commit();
+}
 async function openUsersAdmin(){
   if(!db||!currentAdmin)return;
   openModal('usersModal');
@@ -751,10 +788,8 @@ async function openUsersAdmin(){
   if(box)box.innerHTML='<div class="empty">در حال دریافت کاربران...</div>';
   try{
     const snap=await db.collection('users').get();
-    usersAdminCache=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>{
-      const ap=a.role==='pending'?0:a.role==='blocked'?2:1,bp=b.role==='pending'?0:b.role==='blocked'?2:1;
-      return ap-bp||String(a.email||'').localeCompare(String(b.email||''));
-    });
+    usersAdminRawCache=snap.docs.map(d=>({id:d.id,...d.data()}));
+    usersAdminCache=groupUsersByEmail(usersAdminRawCache);
     renderUsersAdmin();
   }catch(err){if(box)box.innerHTML=`<div class="empty">${escapeHtml(authErrorMessage(err))}</div>`;}
 }
@@ -762,31 +797,45 @@ function renderUsersAdmin(){
   const box=document.getElementById('usersAdminList');if(!box)return;
   if(!usersAdminCache.length){box.innerHTML='<div class="empty">هنوز کاربری ثبت نشده است.</div>';return;}
   box.innerHTML=usersAdminCache.map(u=>{
-    const self=u.id===currentAdmin?.uid;
-    const active=u.active===true;
-    const state=u.role==='blocked'||u.blocked===true?'blocked':u.role==='pending'||!active?'pending':'active';
+    const self=(u._docIds||[u.id]).includes(currentAdmin?.uid);
+    const state=u._state||userState(u);
     const stateLabel=state==='blocked'?'مسدود':state==='pending'?'در انتظار تأیید':'فعال';
     const actions=[];
     if(!self){
       actions.push(`<button class="secondary" type="button" data-user-approve="${u.id}">${state==='pending'?'تأیید و تعیین نقش':'ویرایش نقش'}</button>`);
-      if(state==='blocked')actions.push(`<button class="secondary" type="button" data-user-enable="${u.id}">فعال‌سازی</button>`);
-      else actions.push(`<button class="danger" type="button" data-user-block="${u.id}">مسدود</button>`);
+      if(state==='blocked'){
+        actions.push(`<button class="secondary" type="button" data-user-enable="${u.id}">فعال‌سازی</button>`);
+        actions.push(`<button class="danger" type="button" data-user-delete="${u.id}">حذف</button>`);
+      }else{
+        actions.push(`<button class="danger" type="button" data-user-block="${u.id}">مسدود</button>`);
+      }
     }
     actions.push(`<button class="text-btn" type="button" data-user-reset="${u.id}">بازیابی رمز</button>`);
     return `<div class="user-access-row"><div class="user-access-main"><div class="user-access-email">${escapeHtml(u.email||'')}</div><div class="user-access-meta"><span class="user-role-pill">${escapeHtml(roleFa(u.role))}${self?' · شما':''}</span><span class="user-state-pill ${state}">${stateLabel}</span>${u.name?`<span class="user-role-pill">${escapeHtml(u.name)}</span>`:''}</div></div><div class="user-access-actions">${actions.join('')}</div></div>`;
   }).join('');
 }
-function userById(uid){return usersAdminCache.find(u=>u.id===uid);}
+function userById(uid){return usersAdminCache.find(u=>u.id===uid||(u._docIds||[]).includes(uid));}
 function openUserApprove(uid){
   const u=userById(uid);if(!u)return;
   const role=(u.role&&u.role!=='pending'&&u.role!=='blocked')?u.role:'projectManager';
   showPrompt('تأیید و تعیین نقش',`<form id="userApproveForm"><label>نام نمایشی<input id="approveUserName" value="${escapeHtml(u.name||'')}" placeholder="نام کاربر"></label><label style="display:block;margin-top:10px">نقش<select id="approveUserRole"><option value="projectManager" ${role==='projectManager'?'selected':''}>مدیر پروژه</option><option value="siteSupervisor" ${role==='siteSupervisor'?'selected':''}>سرپرست اجرا</option><option value="admin" ${role==='admin'?'selected':''}>ادمین</option></select></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره دسترسی</button></div></form>`);
-  document.getElementById('userApproveForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;try{await db.collection('users').doc(uid).update({name:document.getElementById('approveUserName').value.trim(),role:document.getElementById('approveUserRole').value,active:true,blocked:false,approvedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});closeModal('promptModal');toast('دسترسی کاربر ذخیره شد');await openUsersAdmin();}catch(err){toast(authErrorMessage(err));if(btn)btn.disabled=false;}};
+  document.getElementById('userApproveForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;try{await updateUserGroup(u,{name:document.getElementById('approveUserName').value.trim(),role:document.getElementById('approveUserRole').value,active:true,blocked:false,hidden:false,approvedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});closeModal('promptModal');toast('دسترسی کاربر ذخیره شد');await openUsersAdmin();}catch(err){toast(authErrorMessage(err));if(btn)btn.disabled=false;}};
 }
 async function setUserBlocked(uid,blocked){
   const u=userById(uid);if(!u)return;
   if(blocked&&!confirm(`دسترسی «${u.email||''}» مسدود شود؟`))return;
-  try{await db.collection('users').doc(uid).update(blocked?{role:'blocked',active:false,blocked:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()}:{role:'pending',active:false,blocked:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});toast(blocked?'کاربر مسدود شد':'کاربر برای تأیید مجدد فعال شد');await openUsersAdmin();}catch(err){toast(authErrorMessage(err));}
+  try{
+    await updateUserGroup(u,blocked?{role:'blocked',active:false,blocked:true,hidden:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()}:{role:'pending',active:false,blocked:false,hidden:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    toast(blocked?'کاربر مسدود شد':'کاربر برای تأیید مجدد فعال شد');await openUsersAdmin();
+  }catch(err){toast(authErrorMessage(err));}
+}
+async function deleteBlockedUser(uid){
+  const u=userById(uid);if(!u||userState(u)!=='blocked')return;
+  if(!confirm(`«${u.email||''}» از فهرست کاربران حذف شود؟\n\nحساب Firebase Authentication برای امنیت حذف نمی‌شود و این کاربر همچنان مسدود خواهد ماند.`))return;
+  try{
+    await updateUserGroup(u,{role:'blocked',active:false,blocked:true,hidden:true,hiddenAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+    toast('کاربر مسدود از فهرست حذف شد');await openUsersAdmin();
+  }catch(err){toast(authErrorMessage(err));}
 }
 async function sendUserPasswordReset(uid){
   const u=userById(uid);if(!u?.email||!auth)return;
@@ -985,6 +1034,7 @@ document.getElementById('usersAdminList')?.addEventListener('click',e=>{
   const approve=e.target.closest('[data-user-approve]');if(approve){openUserApprove(approve.dataset.userApprove);return;}
   const block=e.target.closest('[data-user-block]');if(block){setUserBlocked(block.dataset.userBlock,true);return;}
   const enable=e.target.closest('[data-user-enable]');if(enable){setUserBlocked(enable.dataset.userEnable,false);return;}
+  const del=e.target.closest('[data-user-delete]');if(del){deleteBlockedUser(del.dataset.userDelete);return;}
   const reset=e.target.closest('[data-user-reset]');if(reset){sendUserPasswordReset(reset.dataset.userReset);return;}
 });
 
