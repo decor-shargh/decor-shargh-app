@@ -1,3 +1,84 @@
+const firebaseConfig={
+  apiKey:"AIzaSyD6b5UZEOXW53NQT8AavY5df2T0by5bL7M",
+  authDomain:"decor-shargh.firebaseapp.com",
+  projectId:"decor-shargh",
+  storageBucket:"decor-shargh.firebasestorage.app",
+  messagingSenderId:"773782150656",
+  appId:"1:773782150656:web:80344bf7889e51b8fc02e5",
+  measurementId:"G-54J4STYEY4"
+};
+
+let auth=null;
+let db=null;
+let currentAdmin=null;
+let appStarted=false;
+
+function authEls(){
+  return {
+    gate:document.getElementById('authGate'),
+    shell:document.getElementById('appShell'),
+    form:document.getElementById('loginForm'),
+    email:document.getElementById('loginEmail'),
+    password:document.getElementById('loginPassword'),
+    button:document.getElementById('loginBtn'),
+    message:document.getElementById('authMessage')
+  };
+}
+function setAuthMessage(message,type=''){
+  const el=document.getElementById('authMessage');
+  if(!el)return;
+  el.textContent=message||'';
+  el.className='auth-message'+(type?' '+type:'');
+}
+function showLogin(message=''){
+  const e=authEls();
+  e.shell?.classList.add('is-hidden');
+  e.gate?.classList.remove('is-hidden');
+  if(message)setAuthMessage(message,'error');
+}
+function showApp(){
+  const e=authEls();
+  e.gate?.classList.add('is-hidden');
+  e.shell?.classList.remove('is-hidden');
+  if(!appStarted){appStarted=true;renderAll();}
+  else renderAll();
+}
+function authErrorMessage(err){
+  const code=err?.code||'';
+  if(code.includes('invalid-credential')||code.includes('wrong-password')||code.includes('user-not-found'))return 'ایمیل یا رمز عبور صحیح نیست.';
+  if(code.includes('too-many-requests'))return 'تلاش‌های ورود زیاد بوده؛ کمی بعد دوباره امتحان کنید.';
+  if(code.includes('network-request-failed'))return 'ارتباط با Firebase برقرار نشد. اینترنت یا دسترسی به Firebase را بررسی کنید.';
+  if(code.includes('unauthorized-domain'))return 'دامنه سایت هنوز در Firebase مجاز نشده است.';
+  if(code.includes('permission-denied'))return 'دسترسی این حساب به پنل مجاز نیست.';
+  return 'ورود انجام نشد. دوباره تلاش کنید.';
+}
+async function verifyAdmin(user){
+  const snap=await db.collection('users').doc(user.uid).get();
+  if(!snap.exists)throw Object.assign(new Error('admin-profile-missing'),{code:'permission-denied'});
+  const profile=snap.data()||{};
+  if(profile.active!==true||profile.role!=='admin')throw Object.assign(new Error('not-admin'),{code:'permission-denied'});
+  currentAdmin={uid:user.uid,email:user.email||profile.email||'',...profile};
+  return currentAdmin;
+}
+function initFirebaseAuth(){
+  if(typeof firebase==='undefined'){
+    showLogin('کتابخانه Firebase بارگذاری نشد. دسترسی شبکه به Firebase را بررسی کنید.');
+    return;
+  }
+  try{
+    if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
+    auth=firebase.auth();
+    db=firebase.firestore();
+    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+    auth.onAuthStateChanged(async user=>{
+      if(!user){currentAdmin=null;showLogin();setAuthMessage('ایمیل و رمز عبور ادمین را وارد کنید.');return;}
+      setAuthMessage('در حال بررسی دسترسی ادمین...');
+      try{await verifyAdmin(user);showApp();}
+      catch(err){currentAdmin=null;await auth.signOut().catch(()=>{});showLogin(authErrorMessage(err));}
+    });
+  }catch(err){showLogin(authErrorMessage(err));}
+}
+
 const STORAGE_KEY='decorSharghAdminV1';
 const faDigits='۰۱۲۳۴۵۶۷۸۹';
 const statusLabels={active:'فعال',stopped:'متوقف',terminated:'فسخ‌شده',completed:'خاتمه‌یافته'};
@@ -98,4 +179,25 @@ document.getElementById('contractForm').onsubmit=e=>{e.preventDefault();const da
 document.getElementById('addCategoryBtn').onclick=()=>{showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);document.getElementById('catForm').onsubmit=e=>{e.preventDefault();state.library.push({id:uid('cat'),name:catName.value.trim(),items:[]});save();closeModal('promptModal');renderLibrary()}};
 document.getElementById('libraryList').addEventListener('click',e=>{let b=e.target.closest('[data-lib-add]');if(b)return libraryPrompt(state.library.find(c=>c.id===b.dataset.libAdd));b=e.target.closest('[data-lib-edit-cat]');if(b){const cat=state.library.find(c=>c.id===b.dataset.libEditCat);showPrompt('ویرایش دسته',`<form id="editCat"><label>نام دسته<input id="editCatName" value="${escapeHtml(cat.name)}" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);editCat.onsubmit=ev=>{ev.preventDefault();cat.name=editCatName.value.trim();save();closeModal('promptModal');renderLibrary()};return}b=e.target.closest('[data-lib-del-cat]');if(b){const cat=state.library.find(c=>c.id===b.dataset.libDelCat);if(cat.items.length)return toast('اول فعالیت‌های این دسته را حذف یا منتقل کنید');if(confirm(`دسته «${cat.name}» حذف شود؟`)){state.library=state.library.filter(c=>c.id!==cat.id);save();renderLibrary()}return}b=e.target.closest('[data-lib-edit-act]');if(b){const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libEditAct);libraryPrompt(cat,act);return}b=e.target.closest('[data-lib-del-act]');if(b){const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libDelAct);if(confirm(`فعالیت «${act.name}» از کتابخانه حذف شود؟\nقراردادهای قبلی تغییر نمی‌کنند.`)){cat.items=cat.items.filter(a=>a.id!==act.id);save();renderLibrary();toast('از کتابخانه حذف شد')}return}});
 
-renderAll();
+
+const loginFormEl=document.getElementById('loginForm');
+if(loginFormEl)loginFormEl.addEventListener('submit',async e=>{
+  e.preventDefault();
+  if(!auth){setAuthMessage('Firebase در دسترس نیست.','error');return;}
+  const email=document.getElementById('loginEmail').value.trim();
+  const password=document.getElementById('loginPassword').value;
+  const btn=document.getElementById('loginBtn');
+  btn.disabled=true;btn.textContent='در حال ورود...';setAuthMessage('در حال اتصال...');
+  try{await auth.signInWithEmailAndPassword(email,password);}
+  catch(err){setAuthMessage(authErrorMessage(err),'error');}
+  finally{btn.disabled=false;btn.textContent='ورود';}
+});
+const logoutBtn=document.getElementById('logoutBtn');
+if(logoutBtn)logoutBtn.addEventListener('click',async()=>{
+  if(!auth)return;
+  logoutBtn.disabled=true;
+  try{await auth.signOut();}
+  finally{logoutBtn.disabled=false;}
+});
+
+initFirebaseAuth();

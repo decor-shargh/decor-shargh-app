@@ -8,13 +8,38 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="app-shell">
+  <section id="authGate" class="auth-gate">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="auth-logo">ش</div>
+        <div>
+          <div class="eyebrow">ورود به پنل مدیریت</div>
+          <h1>دکوراسیون شرق</h1>
+        </div>
+      </div>
+      <form id="loginForm" class="auth-form">
+        <label>ایمیل
+          <input id="loginEmail" type="email" autocomplete="username" required placeholder="admin@example.com" />
+        </label>
+        <label>رمز عبور
+          <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••" />
+        </label>
+        <button id="loginBtn" class="primary auth-submit" type="submit">ورود</button>
+        <div id="authMessage" class="auth-message">در حال بررسی وضعیت ورود...</div>
+      </form>
+    </div>
+  </section>
+
+  <div class="app-shell is-hidden" id="appShell">
     <header class="topbar">
       <div>
         <div class="eyebrow">پنل مدیریت</div>
         <h1>دکوراسیون شرق</h1>
       </div>
-      <button class="primary" id="newContractBtn">+ قرارداد جدید</button>
+      <div class="top-actions">
+        <button class="secondary logout-btn" id="logoutBtn" type="button">خروج</button>
+        <button class="primary" id="newContractBtn">+ قرارداد جدید</button>
+      </div>
     </header>
 
     <main id="appMain">
@@ -154,6 +179,9 @@
   </div>
 
   <div id="toast" class="toast"></div>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

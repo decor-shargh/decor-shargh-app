@@ -22,3 +22,12 @@
 
 ## ذخیره‌سازی فعلی
 این نسخه برای تست اولیه از `localStorage` مرورگر استفاده می‌کند. هنوز Backend / Firebase / احراز هویت به آن متصل نشده است.
+
+
+## Firebase Admin Login (v2)
+- Firebase Authentication: Email/Password
+- Session persistence: LOCAL
+- Admin authorization: Firestore `users/{uid}` must contain `role: "admin"` and `active: true`
+- Frontend host: GitHub Pages
+- Required Authorized Domain: `decor-shargh.github.io`
+- Current contracts/library data remain in browser LocalStorage in this version; Firestore data migration is the next step.
