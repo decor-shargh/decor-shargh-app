@@ -4,23 +4,23 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffffff" />
-  <meta name="app-version" content="12.0.0" />
+  <meta name="app-version" content="13.2.0" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="دکوراسیون شرق" />
-  <title>دکوراسیون شرق | پنل ادمین</title>
-  <link rel="manifest" href="manifest.webmanifest?v=12" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=12" />
-  <link rel="icon" href="icon-192.png?v=12" />
+  <meta name="apple-mobile-web-app-title" content="Decor Shargh" />
+  <title>Decor Shargh | Admin Panel</title>
+  <link rel="manifest" href="manifest.webmanifest?v=132" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=132" />
+  <link rel="icon" href="icon-192.png?v=132" />
   <script>try{const t=localStorage.getItem('decorSharghTheme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css?v=12" />
+  <link rel="stylesheet" href="styles.css?v=132" />
 </head>
 <body>
   <section id="bootSplash" class="boot-splash" aria-live="polite">
     <div class="boot-brand">
-      <div class="boot-logo"><img src="brand-mark.png?v=12" alt=""></div>
-      <div class="boot-name">دکوراسیون شرق</div>
+      <div class="boot-logo"><img src="brand-logo.png?v=132" alt="Decor Shargh"></div>
+      <div class="boot-name">Decor Shargh</div>
       <div class="boot-loader" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="boot-text">در حال آماده‌سازی...</div>
     </div>
@@ -29,9 +29,9 @@
   <section id="installPrompt" class="install-sheet is-hidden" aria-hidden="true">
     <div class="install-backdrop" data-install-dismiss></div>
     <div class="install-card">
-      <div class="install-icon"><img src="brand-mark.png?v=12" alt=""></div>
+      <div class="install-icon"><img src="brand-mark.png?v=132" alt="Decor Shargh"></div>
       <div class="install-copy">
-        <h3>نصب اپلیکیشن دکوراسیون شرق</h3>
+        <h3>Install Decor Shargh</h3>
         <p id="installText">برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.</p>
       </div>
       <div class="install-actions">
@@ -47,7 +47,7 @@
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card login-reference-card">
       <div class="login-logo-wrap">
-        <img class="brand-login-logo" src="brand-logo.png?v=12" alt="لوگوی دکوراسیون شرق">
+        <img class="brand-login-logo" src="brand-logo.png?v=132" alt="لوگوی دکوراسیون شرق">
       </div>
       <div class="login-heading">
         <h1>Decor Shargh Control Center</h1>
@@ -77,7 +77,7 @@
     <div class="auth-decor auth-decor-one"></div>
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=12" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=132" alt="لوگوی دکوراسیون شرق"></div>
       <h2>در انتظار تأیید حساب</h2>
       <p id="pendingEmail" class="pending-email"></p>
       <div class="pending-badge">در انتظار تأیید مدیر</div>
@@ -89,7 +89,7 @@
 
   <section id="blockedGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=12" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=132" alt="لوگوی دکوراسیون شرق"></div>
       <h2>دسترسی لغو شده</h2>
       <p class="muted">این حساب در حال حاضر اجازه ورود به سامانه را ندارد.</p>
       <button id="blockedLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -98,7 +98,7 @@
 
   <section id="roleGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=12" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-mark.png?v=132" alt="لوگوی دکوراسیون شرق"></div>
       <h2 id="roleGateTitle">دسترسی تأیید شد</h2>
       <p id="roleGateCopy" class="muted pending-copy">پنل این نقش هنوز در حال آماده‌سازی است.</p>
       <button id="roleGateLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -108,13 +108,13 @@
   <div class="app-shell is-hidden" id="appShell">
     <header class="topbar">
       <div class="top-brand">
-        <img src="brand-mark.png?v=12" alt="لوگوی دکوراسیون شرق">
-        <div>
-          <div class="eyebrow">پنل مدیریت</div>
-          <h1>دکوراسیون شرق</h1>
+        <img src="brand-mark.png?v=132" alt="Decor Shargh logo">
+        <div class="brand-copy">
+          <h1>Decor Shargh</h1>
         </div>
       </div>
       <div class="top-actions">
+        <span class="panel-badge">Admin Panel</span>
         <button class="secondary theme-toggle-btn" id="themeToggleBtn" type="button" aria-label="تغییر حالت نمایش" title="تغییر حالت روشن/تیره">☾</button>
         <button class="secondary logout-btn" id="logoutBtn" type="button">خروج</button>
       </div>
@@ -148,16 +148,30 @@
 
       <section class="view" data-view="contracts">
         <div class="section-head sticky-title"><h2>قراردادها</h2><button class="primary" id="newContractBtn" type="button">+ قرارداد جدید</button></div>
-        <section class="panel filter-panel">
-          <div class="filter-grid">
+        <section class="panel filter-panel compact-filter-panel">
+          <div class="filter-grid compact-filter-grid">
             <label>نام مشتری
               <input id="filterCustomer" type="search" placeholder="جستجو..." />
             </label>
-            <label>از تاریخ عقد
-              <input id="filterFrom" type="text" inputmode="numeric" placeholder="۱۴۰۵/۰۷/۰۱" />
+            <label>سال عقد قرارداد
+              <input id="filterYear" type="text" inputmode="numeric" placeholder="۱۴۰۵" maxlength="4" />
             </label>
-            <label>تا تاریخ عقد
-              <input id="filterTo" type="text" inputmode="numeric" placeholder="۱۴۰۵/۱۲/۲۹" />
+            <label>ماه عقد قرارداد
+              <select id="filterMonth">
+                <option value="">همه ماه‌ها</option>
+                <option value="01">فروردین</option>
+                <option value="02">اردیبهشت</option>
+                <option value="03">خرداد</option>
+                <option value="04">تیر</option>
+                <option value="05">مرداد</option>
+                <option value="06">شهریور</option>
+                <option value="07">مهر</option>
+                <option value="08">آبان</option>
+                <option value="09">آذر</option>
+                <option value="10">دی</option>
+                <option value="11">بهمن</option>
+                <option value="12">اسفند</option>
+              </select>
             </label>
             <label>وضعیت
               <select id="filterStatus">
@@ -169,7 +183,7 @@
               </select>
             </label>
           </div>
-          <button id="clearFilters" class="secondary">پاک کردن فیلترها</button>
+          <button id="clearFilters" class="secondary compact-clear-btn">پاک کردن فیلترها</button>
         </section>
         <div id="contractsList" class="contract-grid"></div>
       </section>
@@ -187,10 +201,26 @@
 
       <section class="view" data-view="more">
         <section class="panel more-list">
-          <button class="menu-row" data-go="library"><span>کتابخانه فعالیت‌ها</span><span>←</span></button>
-          <button class="menu-row" id="openBackupBtn" type="button"><span>پشتیبان‌گیری و بازیابی</span><span>←</span></button>
-          <div class="menu-row disabled"><span>تنظیمات</span><span class="muted">بعداً</span></div>
-          <button class="menu-row" id="openUsersBtn" type="button"><span>کاربران و دسترسی‌ها</span><span>←</span></button>
+          <button class="menu-row" data-go="library" type="button">
+            <span class="menu-row-info"><span class="menu-sticker">📚</span><span class="menu-labels"><strong>کتابخانه فعالیت‌ها</strong><small>مدیریت دسته‌ها، فعالیت‌ها و ضرایب</small></span></span>
+            <span class="menu-arrow">←</span>
+          </button>
+          <button class="menu-row" id="openUsersBtn" type="button">
+            <span class="menu-row-info"><span class="menu-sticker">👥</span><span class="menu-labels"><strong>کاربران و دسترسی‌ها</strong><small>تأیید، نقش‌دهی و مدیریت حساب‌ها</small></span></span>
+            <span class="menu-arrow">←</span>
+          </button>
+          <button class="menu-row" id="openBackupBtn" type="button">
+            <span class="menu-row-info"><span class="menu-sticker">🗂️</span><span class="menu-labels"><strong>پشتیبان‌گیری و بازیابی</strong><small>خروجی JSON و بازیابی امن اطلاعات</small></span></span>
+            <span class="menu-arrow">←</span>
+          </button>
+          <button class="menu-row" id="openSystemLogBtn" type="button">
+            <span class="menu-row-info"><span class="menu-sticker">🧾</span><span class="menu-labels"><strong>لاگ سیستم</strong><small>نسخه، وضعیت اجرا و رویدادهای اخیر</small></span></span>
+            <span class="menu-arrow">←</span>
+          </button>
+          <div class="menu-row disabled">
+            <span class="menu-row-info"><span class="menu-sticker">⚙️</span><span class="menu-labels"><strong>تنظیمات</strong><small>در نسخه‌های بعدی اضافه می‌شود</small></span></span>
+            <span class="muted">بعداً</span>
+          </div>
         </section>
       </section>
     </main>
@@ -306,10 +336,25 @@
     </div>
   </div>
 
+
+  <div class="modal" id="systemLogModal" aria-hidden="true">
+    <div class="modal-backdrop" data-close-system-log></div>
+    <div class="modal-card system-log-card">
+      <div class="modal-head">
+        <div>
+          <h3>لاگ سیستم</h3>
+          <p class="muted small">خلاصه وضعیت نسخه جاری، دستگاه و رویدادهای اخیر پنل Admin</p>
+        </div>
+        <button class="icon-btn" data-close-system-log>×</button>
+      </div>
+      <div id="systemLogContent"></div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js?v=12"></script>
+  <script src="app.js?v=132"></script>
 </body>
 </html>

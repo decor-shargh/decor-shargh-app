@@ -1,8 +1,8 @@
 {
   "id": "./",
-  "name": "دکوراسیون شرق",
-  "short_name": "دکور شرق",
-  "description": "پنل مدیریت قراردادها و اجرای پروژه‌های دکوراسیون شرق",
+  "name": "Decor Shargh",
+  "short_name": "Decor Shargh",
+  "description": "Decor Shargh admin app for contracts and project execution.",
   "lang": "fa",
   "dir": "rtl",
   "start_url": "./",

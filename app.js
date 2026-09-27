@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="12.0.0";
+const APP_VERSION="13.2.0";
 
 let auth=null;
 let db=null;
@@ -140,21 +140,21 @@ function hideAllAuthScreens(){
   document.getElementById('roleGate')?.classList.add('is-hidden');
   e.shell?.classList.add('is-hidden');
 }
-function showLogin(message=''){
+function showLogin(message=''){addSystemLog('نمایش صفحه ورود',message||'');
   hideAllAuthScreens();
   const e=authEls();
   e.gate?.classList.remove('is-hidden');
   hideBootSplash();
   if(message)setAuthMessage(message,'error');
 }
-function showPending(profile,user){
+function showPending(profile,user){addSystemLog('حساب در انتظار تأیید',user?.email||profile?.email||'');
   hideAllAuthScreens();
   const email=document.getElementById('pendingEmail');
   if(email)email.textContent=user?.email||profile?.email||'';
   document.getElementById('pendingGate')?.classList.remove('is-hidden');
   hideBootSplash();
 }
-function showBlocked(){
+function showBlocked(){addSystemLog('نمایش حساب مسدود','');
   hideAllAuthScreens();
   document.getElementById('blockedGate')?.classList.remove('is-hidden');
   hideBootSplash();
@@ -162,7 +162,7 @@ function showBlocked(){
 function roleFa(role){
   return role==='admin'?'ادمین':role==='projectManager'?'مدیر پروژه':role==='siteSupervisor'?'سرپرست اجرا':role==='pending'?'در انتظار تأیید':role==='blocked'?'مسدود':'کاربر';
 }
-function showRoleGate(profile,user){
+function showRoleGate(profile,user){addSystemLog('نمایش پنل نقشِ آماده‌نشده',user?.email||profile?.email||'');
   hideAllAuthScreens();
   const role=profile?.role||'';
   const title=document.getElementById('roleGateTitle');
@@ -172,7 +172,7 @@ function showRoleGate(profile,user){
   document.getElementById('roleGate')?.classList.remove('is-hidden');
   hideBootSplash();
 }
-function showApp(){
+function showApp(){addSystemLog('ورود به پنل ادمین',currentAdmin?.email||currentUserProfile?.email||'');
   hideAllAuthScreens();
   document.getElementById('appShell')?.classList.remove('is-hidden');
   hideBootSplash();
@@ -383,8 +383,20 @@ function score(v,l,c){return +(v*.4+l*.35+c*.25).toFixed(2)}
 function uid(prefix='id'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8)}
 function freshState(){return {contracts:[],library:[]}}
 let state=freshState();
+let libraryExpandedCats=new Set();
+let systemLogs=[];
 function legacyLocalContracts(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return Array.isArray(s?.contracts)?s.contracts:[]}catch{return []}}
 function save(){/* Firestore is the source of truth. Kept as a no-op for legacy call safety. */}
+function addSystemLog(action,detail=''){
+  systemLogs.unshift({time:new Date().toISOString(),action:String(action||''),detail:String(detail||'')});
+  systemLogs=systemLogs.slice(0,50);
+}
+function systemLogTime(iso){
+  try{return new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',second:'2-digit',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));}
+  catch{return iso||'';}
+}
+addSystemLog('راه‌اندازی نسخه',APP_VERSION);
+
 
 const LIB_CAT_COLLECTION='activityCategories';
 const LIB_ACT_COLLECTION='activityLibrary';
@@ -618,8 +630,9 @@ async function persistContract(c){
 }
 function toFa(v){return String(v).replace(/\d/g,d=>faDigits[d])}
 function toEn(v=''){return String(v).replace(/[۰-۹]/g,d=>faDigits.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d))}
-function money(v){const n=Number(toEn(v).replace(/,/g,''))||0;return toFa(n.toLocaleString('en-US'))+' تومان'}
+function money(v){const n=Number(toEn(v).replace(/,/g,''))||0;return toFa(n.toLocaleString('en-US'))+' ریال'}
 function normalizeDate(v){v=toEn(v).trim().replace(/[-.]/g,'/');const m=v.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})$/);if(!m)return '';return `${m[1]}/${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}`}
+function normalizeYear(v=''){return toEn(v).replace(/\D/g,'').slice(0,4)}
 
 function div(a,b){return Math.trunc(a/b)}
 function jalCal(jy){const breaks=[-61,9,38,199,426,686,756,818,1111,1181,1210,1635,2060,2097,2192,2262,2324,2394,2456,3178];let bl=breaks.length,gy=jy+621,leapJ=-14,jp=breaks[0],jm,jump,n,i;if(jy<jp||jy>=breaks[bl-1])throw Error('Invalid Jalaali year '+jy);for(i=1;i<bl;i+=1){jm=breaks[i];jump=jm-jp;if(jy<jm)break;leapJ+=div(jump,33)*8+div(jump%33,4);jp=jm}n=jy-jp;leapJ+=div(n,33)*8+div((n%33)+3,4);if(jump%33===4&&jump-n===4)leapJ+=1;const leapG=div(gy,4)-div((div(gy,100)+1)*3,4)-150;const march=20+leapJ-leapG;if(jump-n<6)n=n-jump+div(jump+4,33)*33;let leap=((n+1)%33-1)%4;if(leap===-1)leap=4;return {leap,gy,march}}
@@ -693,12 +706,12 @@ function renderHome(){const active=activeContracts();const near=active.filter(c=
 function renderCharts(active){const pc=document.getElementById('progressChart');pc.innerHTML=active.length?active.map(c=>{const p=contractProgress(c);return `<div class="bar-row"><div class="small">${escapeHtml(c.customerName)}</div><div class="bar-bg"><div class="bar" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>`}).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
  const counts={active:0,near:0,critical:0,stopped:0};state.contracts.forEach(c=>{if(c.status==='stopped')counts.stopped++;else if(c.status==='active'){const d=dueState(c).key;if(d==='near')counts.near++;else if(d==='critical'||d==='overdue')counts.critical++;else counts.active++;}});const total=Object.values(counts).reduce((a,b)=>a+b,0);document.getElementById('donutTotal').textContent=toFa(total);const colors=['#2563eb','#f59e0b','#dc2626','#6b7280'];let acc=0,parts=[];Object.values(counts).forEach((v,i)=>{const start=total?acc/total*100:0;acc+=v;const end=total?acc/total*100:100;parts.push(`${colors[i]} ${start}% ${end}%`)});document.getElementById('statusDonut').style.background=total?`conic-gradient(${parts.join(',')})`:'#e5e7eb';const labels=[['فعال',counts.active],['نزدیک سررسید',counts.near],['بحرانی',counts.critical],['متوقف',counts.stopped]];document.getElementById('statusLegend').innerHTML=labels.map((x,i)=>`<div class="legend-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colors[i]};margin-left:7px"></span>${x[0]}</span><strong>${toFa(x[1])}</strong></div>`).join('')}
 
-function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDate(b.contractDate)||0)-(jalaliToDate(a.contractDate)||0));const name=document.getElementById('filterCustomer').value.trim();const from=normalizeDate(document.getElementById('filterFrom').value);const to=normalizeDate(document.getElementById('filterTo').value);const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>c.customerName.includes(name));if(st)arr=arr.filter(c=>c.status===st);if(from){const fd=jalaliToDate(from);arr=arr.filter(c=>(jalaliToDate(c.contractDate)||0)>=fd)}if(to){const td=jalaliToDate(to);arr=arr.filter(c=>(jalaliToDate(c.contractDate)||0)<=td)}document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
+function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDate(b.contractDate)||0)-(jalaliToDate(a.contractDate)||0));const name=document.getElementById('filterCustomer').value.trim();const year=normalizeYear(document.getElementById('filterYear').value);const month=document.getElementById('filterMonth').value;const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));if(st)arr=arr.filter(c=>c.status===st);if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
 
-function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>`<section class="category-card"><div class="category-head"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div>${cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty">فعالیتی در این دسته نیست.</div>'}</section>`).join('')}
+function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>{const expanded=libraryExpandedCats.has(cat.id);const body=cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty compact-empty">فعالیتی در این دسته نیست.</div>';return `<section class="category-card ${expanded?'open':''}"><div class="category-head"><button class="category-toggle" type="button" data-lib-toggle="${cat.id}" aria-expanded="${expanded?'true':'false'}"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><span class="category-chevron">${expanded?'▾':'▸'}</span></button><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div><div class="category-body ${expanded?'':'is-hidden'}">${body}</div></section>`}).join('')}
 
 function renderAll(){renderHome();renderContracts();renderLibrary()}
-function switchView(name){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));if(name==='contracts')renderContracts();if(name==='library')renderLibrary();window.scrollTo({top:0,behavior:'smooth'})}
+function switchView(name){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));if(name==='contracts')renderContracts();if(name==='library')renderLibrary();addSystemLog('تغییر بخش',name);window.scrollTo({top:0,behavior:'smooth'})}
 
 function openContractForm(c=null){
   document.getElementById('contractForm').reset();
@@ -828,7 +841,7 @@ async function updateUserGroup(u,payload){
   ids.forEach(id=>batch.set(db.collection('users').doc(id),payload,{merge:true}));
   await batch.commit();
 }
-async function openUsersAdmin(){
+async function openUsersAdmin(){addSystemLog('باز کردن کاربران و دسترسی‌ها','');
   if(!db||!currentAdmin)return;
   openModal('usersModal');
   const box=document.getElementById('usersAdminList');
@@ -970,10 +983,38 @@ async function restoreBackup(payload){
   for(const name of BACKUP_COLLECTIONS)await replaceCollectionFromBackup(name,payload.collections[name]||[]);
   await db.collection('users').doc(currentAdmin.uid).set({...adminSafety,email:currentAdmin.email||adminSafety.email||'',role:'admin',active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
 }
-function openBackupModal(){
+function openBackupModal(){addSystemLog('باز کردن پشتیبان‌گیری و بازیابی','');
   pendingRestorePayload=null;
   document.getElementById('restorePreview')?.classList.add('is-hidden');
   openModal('backupModal');
+}
+
+function systemLogSummaryRows(){
+  const active=activeContracts();
+  const totalActivities=state.library.reduce((sum,cat)=>sum+(cat.items?.length||0),0);
+  const rows=[
+    ['نسخه اپ',APP_VERSION],
+    ['کاربر فعلی',currentAdmin?.email||currentUserProfile?.email||'—'],
+    ['قراردادها',toFa(state.contracts.length)],
+    ['قراردادهای فعال',toFa(active.length)],
+    ['دسته‌های کتابخانه',toFa(state.library.length)],
+    ['فعالیت‌های کتابخانه',toFa(totalActivities)],
+    ['تم',currentTheme()==='dark'?'Dark':'Light'],
+    ['وضعیت شبکه',navigator.onLine?'Online':'Offline'],
+    ['حالت نصب',isStandaloneMode()?'Installed PWA':'Browser'],
+    ['آخرین بروزرسانی لاگ',systemLogs[0]?systemLogTime(systemLogs[0].time):'—']
+  ];
+  return rows.map(([k,v])=>`<div class="system-log-row"><span>${escapeHtml(k)}</span><strong>${escapeHtml(String(v))}</strong></div>`).join('');
+}
+function systemLogEntriesHtml(){
+  if(!systemLogs.length)return '<div class="empty compact-empty">هنوز رویدادی ثبت نشده است.</div>';
+  return systemLogs.slice(0,16).map(item=>`<div class="system-log-entry"><div><strong>${escapeHtml(item.action)}</strong>${item.detail?`<div class="small muted">${escapeHtml(item.detail)}</div>`:''}</div><time>${escapeHtml(systemLogTime(item.time))}</time></div>`).join('');
+}
+function openSystemLogModal(){
+  addSystemLog('باز کردن لاگ سیستم','');
+  const box=document.getElementById('systemLogContent');
+  if(box)box.innerHTML=`<section class="system-log-grid">${systemLogSummaryRows()}</section><section class="system-log-history"><div class="section-head"><h3>رویدادهای اخیر</h3></div>${systemLogEntriesHtml()}</section>`;
+  openModal('systemLogModal');
 }
 
 // Global events
@@ -1016,7 +1057,7 @@ document.getElementById('contractForm').onsubmit=async e=>{
     if(btn)btn.disabled=false;
   }
 };
-['filterCustomer','filterFrom','filterTo','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterFrom.value='';filterTo.value='';filterStatus.value='';renderContracts()};
+['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(id==='filterMonth'?'change':'input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
   document.getElementById('catForm').onsubmit=async e=>{
@@ -1025,7 +1066,9 @@ document.getElementById('addCategoryBtn').onclick=()=>{
   };
 };
 document.getElementById('libraryList').addEventListener('click',async e=>{
-  let b=e.target.closest('[data-lib-add]');
+  let b=e.target.closest('[data-lib-toggle]');
+  if(b){const id=b.dataset.libToggle;libraryExpandedCats.has(id)?libraryExpandedCats.delete(id):libraryExpandedCats.add(id);renderLibrary();return;}
+  b=e.target.closest('[data-lib-add]');
   if(b)return libraryPrompt(state.library.find(c=>c.id===b.dataset.libAdd));
   b=e.target.closest('[data-lib-edit-cat]');
   if(b){
@@ -1121,10 +1164,12 @@ document.getElementById('usersAdminList')?.addEventListener('click',e=>{
 });
 
 document.getElementById('openBackupBtn')?.addEventListener('click',openBackupModal);
+document.getElementById('openSystemLogBtn')?.addEventListener('click',openSystemLogModal);
+document.querySelectorAll('[data-close-system-log]').forEach(b=>b.addEventListener('click',()=>closeModal('systemLogModal')));
 document.querySelectorAll('[data-close-backup]').forEach(b=>b.addEventListener('click',()=>closeModal('backupModal')));
 document.getElementById('downloadBackupBtn')?.addEventListener('click',async e=>{
   const btn=e.currentTarget;btn.disabled=true;btn.textContent='در حال آماده‌سازی...';
-  try{await downloadBackup();toast('فایل بکاپ دانلود شد')}catch{toast('ساخت بکاپ انجام نشد')}
+  try{await downloadBackup();addSystemLog('دانلود بکاپ','');toast('فایل بکاپ دانلود شد')}catch{toast('ساخت بکاپ انجام نشد')}
   finally{btn.disabled=false;btn.textContent='دانلود بکاپ';}
 });
 const restoreFileInput=document.getElementById('restoreFileInput');
@@ -1142,7 +1187,7 @@ restoreFileInput?.addEventListener('change',async()=>{
       const btn=e.currentTarget;btn.disabled=true;btn.textContent='در حال بازیابی...';
       try{
         const emergency=await collectBackupPayload();downloadJsonFile(emergency,'decor-shargh-before-restore');
-        await restoreBackup(pendingRestorePayload);toast('بازیابی با موفقیت انجام شد');pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';closeModal('backupModal');
+        await restoreBackup(pendingRestorePayload);addSystemLog('بازیابی بکاپ','');toast('بازیابی با موفقیت انجام شد');pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';closeModal('backupModal');
       }catch(err){console.error(err);toast(err?.message||'بازیابی انجام نشد');btn.disabled=false;btn.textContent='تأیید و شروع بازیابی';}
     };
   }catch(err){pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';toast(err?.message||'فایل بکاپ معتبر نیست');}

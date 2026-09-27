@@ -1,15 +1,15 @@
-const CACHE_NAME = 'decor-shargh-v12-20260927-home-layout-compact-logo';
+const CACHE_NAME = 'decor-shargh-v13-2-20260927-safe-brand-unified';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=12',
-  './app.js?v=12',
-  './manifest.webmanifest?v=12',
-  './brand-logo.png?v=12',
-  './brand-mark.png?v=12',
-  './icon-192.png?v=12',
-  './icon-512.png?v=12',
-  './apple-touch-icon.png?v=12',
+  './styles.css?v=132',
+  './app.js?v=132',
+  './manifest.webmanifest?v=132',
+  './brand-logo.png?v=132',
+  './brand-mark.png?v=132',
+  './icon-192.png?v=132',
+  './icon-512.png?v=132',
+  './apple-touch-icon.png?v=132',
   './version.json'
 ];
 
@@ -32,7 +32,6 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // HTML/JS/CSS/version are network-first with cache reload so installed PWA does not get stuck on an old build.
   const isCritical = request.mode === 'navigate' || /(?:index\.html|app\.js|styles\.css|version\.json)$/.test(url.pathname);
   if (isCritical) {
     event.respondWith(
