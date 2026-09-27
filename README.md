@@ -1,23 +1,20 @@
-# دکوراسیون شرق — Admin V5
+# دکوراسیون شرق — Admin V8
 
-نسخه V5 پنل Admin.
+نسخه V8 شامل:
+- لوگوی رسمی جدید دکوراسیون شرق در Login، Splash، Header و آیکون PWA
+- Login مشابه Afrachoob Control Center
+- Email/Password Firebase Authentication
+- نمایش/مخفی‌سازی رمز
+- Remember Me مشابه افراچوب: برای کاربران غیرادمین رمز به‌صورت رمزگذاری‌شده روی همان دستگاه نگهداری می‌شود؛ برای Admin ذخیره نمی‌شود
+- ساخت حساب جدید با Firebase Auth و پروفایل `users/{uid}` در حالت `pending`
+- صفحه انتظار تأیید مدیر برای حساب‌های جدید
+- Session پایدار و بدون flash صفحه Login هنگام Refresh
+- قراردادها و کتابخانه فعالیت‌ها روی Firestore
+- PWA و نصب اپ
+- Backup JSON از Firestore و Restore امن با بکاپ اضطراری قبل از بازیابی
 
-## تغییرات این نسخه
-- قراردادها از LocalStorage به Cloud Firestore منتقل شدند و Firestore مرجع اصلی است.
-- اگر قراردادهای نسخه قدیمی فقط در LocalStorage باشند و Firestore خالی باشد، یک بار به‌صورت خودکار مهاجرت می‌شوند.
-- ایجاد، ویرایش، تغییر وضعیت، درصد پیشرفت و فعالیت‌های قرارداد مستقیماً در Firestore ذخیره می‌شوند.
-- هنگام ایجاد/ویرایش قرارداد، فعالیت‌ها را همان‌جا از کتابخانه Firestore جستجو و اضافه می‌کنید.
-- فعالیت‌های انتخاب‌شده به‌صورت snapshot داخل قرارداد ذخیره می‌شوند تا تغییرات بعدی کتابخانه، قراردادهای قبلی را خراب نکند.
-- Login Firebase، Session محلی، کنترل role=admin و PWA نسخه قبل حفظ شده‌اند.
+## فایل مهم Rules
+برای کارکرد «ساخت حساب جدید» باید محتوای `firestore.rules` در Firebase > Firestore > Rules قرار داده و Publish شود.
 
-## فایل‌های لازم برای GitHub Pages
-- index.html
-- styles.css
-- app.js
-- manifest.webmanifest
-- service-worker.js
-- icon-192.png
-- icon-512.png
-- apple-touch-icon.png
-
-تمام این فایل‌ها را در root ریپوی GitHub Pages قرار دهید.
+## نکته Backup
+Backup شامل Firestore است و رمز عبور Firebase Authentication را ذخیره نمی‌کند.

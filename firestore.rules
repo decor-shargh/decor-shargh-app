@@ -1,0 +1,38 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.active == true
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
+
+      // ساخت حساب جدید: کاربر فقط می‌تواند پروفایل خودش را در حالت pending بسازد.
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.role == "pending"
+        && request.resource.data.active == false
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.keys().hasOnly([
+          "email", "name", "role", "active", "requestedAt", "createdAt"
+        ]);
+
+      // تغییر نقش/فعال‌سازی فقط توسط ادمین.
+      allow update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

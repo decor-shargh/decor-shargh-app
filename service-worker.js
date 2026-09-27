@@ -1,13 +1,15 @@
-const CACHE_NAME = 'decor-shargh-v6-20260927-syncfix';
+const CACHE_NAME = 'decor-shargh-v8-20260927-brand-backup-auth';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=6',
-  './app.js?v=6',
-  './manifest.webmanifest?v=6',
-  './icon-192.png?v=6',
-  './icon-512.png?v=6',
-  './apple-touch-icon.png?v=6',
+  './styles.css?v=8',
+  './app.js?v=8',
+  './manifest.webmanifest?v=8',
+  './brand-logo.png?v=8',
+  './brand-mark.png?v=8',
+  './icon-192.png?v=8',
+  './icon-512.png?v=8',
+  './apple-touch-icon.png?v=8',
   './version.json'
 ];
 

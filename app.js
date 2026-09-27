@@ -8,11 +8,18 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="6.0.0";
+const APP_VERSION="8.0.0";
 
 let auth=null;
 let db=null;
 let currentAdmin=null;
+let currentUserProfile=null;
+let profileUnsub=null;
+let signupInProgress=false;
+let pendingRememberIntent=null;
+const REMEMBERED_LOGIN_STORAGE_KEY='decor-shargh-remembered-login-v2';
+const REMEMBERED_LOGIN_DB='decor-shargh-secure-login';
+const REMEMBERED_LOGIN_KEY_ID='remember-key-v1';
 let appStarted=false;
 let libraryReady=false;
 let libraryCategoryDocs=[];
@@ -100,14 +107,19 @@ function setupPwaInstall(){
   }
 }
 
+
 function authEls(){
   return {
     gate:document.getElementById('authGate'),
+    pending:document.getElementById('pendingGate'),
+    blocked:document.getElementById('blockedGate'),
     shell:document.getElementById('appShell'),
     form:document.getElementById('loginForm'),
     email:document.getElementById('loginEmail'),
     password:document.getElementById('loginPassword'),
+    remember:document.getElementById('rememberMe'),
     button:document.getElementById('loginBtn'),
+    signup:document.getElementById('signupBtn'),
     message:document.getElementById('authMessage')
   };
 }
@@ -117,17 +129,35 @@ function setAuthMessage(message,type=''){
   el.textContent=message||'';
   el.className='auth-message'+(type?' '+type:'');
 }
-function showLogin(message=''){
+function hideAllAuthScreens(){
   const e=authEls();
+  e.gate?.classList.add('is-hidden');
+  e.pending?.classList.add('is-hidden');
+  e.blocked?.classList.add('is-hidden');
   e.shell?.classList.add('is-hidden');
+}
+function showLogin(message=''){
+  hideAllAuthScreens();
+  const e=authEls();
   e.gate?.classList.remove('is-hidden');
   hideBootSplash();
   if(message)setAuthMessage(message,'error');
 }
+function showPending(profile,user){
+  hideAllAuthScreens();
+  const email=document.getElementById('pendingEmail');
+  if(email)email.textContent=user?.email||profile?.email||'';
+  document.getElementById('pendingGate')?.classList.remove('is-hidden');
+  hideBootSplash();
+}
+function showBlocked(){
+  hideAllAuthScreens();
+  document.getElementById('blockedGate')?.classList.remove('is-hidden');
+  hideBootSplash();
+}
 function showApp(){
-  const e=authEls();
-  e.gate?.classList.add('is-hidden');
-  e.shell?.classList.remove('is-hidden');
+  hideAllAuthScreens();
+  document.getElementById('appShell')?.classList.remove('is-hidden');
   hideBootSplash();
   if(!appStarted){appStarted=true;renderAll();}
   else renderAll();
@@ -135,61 +165,164 @@ function showApp(){
 function authErrorMessage(err){
   const code=err?.code||'';
   if(code.includes('invalid-credential')||code.includes('wrong-password')||code.includes('user-not-found'))return 'ایمیل یا رمز عبور صحیح نیست.';
+  if(code.includes('email-already-in-use'))return 'این ایمیل قبلاً ثبت شده — به‌جای «ساخت حساب جدید» از «ورود» استفاده کنید.';
+  if(code.includes('invalid-email'))return 'فرمت ایمیل صحیح نیست.';
+  if(code.includes('weak-password'))return 'رمز عبور باید حداقل ۶ کاراکتر باشد.';
   if(code.includes('too-many-requests'))return 'تلاش‌های ورود زیاد بوده؛ کمی بعد دوباره امتحان کنید.';
-  if(code.includes('network-request-failed'))return 'ارتباط با Firebase برقرار نشد. اینترنت یا دسترسی به Firebase را بررسی کنید.';
+  if(code.includes('network-request-failed'))return 'ارتباط با Firebase برقرار نشد. VPN یا دسترسی به Firebase را بررسی کنید.';
   if(code.includes('unauthorized-domain'))return 'دامنه سایت هنوز در Firebase مجاز نشده است.';
   if(code.includes('permission-denied'))return 'دسترسی این حساب به پنل مجاز نیست.';
-  return 'ورود انجام نشد. دوباره تلاش کنید.';
+  return 'عملیات ورود انجام نشد. دوباره تلاش کنید.';
 }
-async function verifyAdmin(user){
-  const snap=await db.collection('users').doc(user.uid).get();
-  if(!snap.exists)throw Object.assign(new Error('admin-profile-missing'),{code:'permission-denied'});
-  const profile=snap.data()||{};
-  if(profile.active!==true||profile.role!=='admin')throw Object.assign(new Error('not-admin'),{code:'permission-denied'});
-  currentAdmin={uid:user.uid,email:user.email||profile.email||'',...profile};
-  return currentAdmin;
+
+function bytesToBase64(bytes){
+  let binary=''; const chunk=0x8000;
+  for(let i=0;i<bytes.length;i+=chunk)binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));
+  return btoa(binary);
+}
+function base64ToBytes(value){
+  const binary=atob(value||'');const bytes=new Uint8Array(binary.length);
+  for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+  return bytes;
+}
+function openRememberKeyDb(){
+  return new Promise((resolve,reject)=>{
+    if(!window.indexedDB){reject(new Error('indexeddb-unavailable'));return;}
+    const req=indexedDB.open(REMEMBERED_LOGIN_DB,1);
+    req.onupgradeneeded=()=>{const x=req.result;if(!x.objectStoreNames.contains('keys'))x.createObjectStore('keys');};
+    req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error||new Error('indexeddb-open-failed'));
+  });
+}
+async function getRememberCryptoKey(){
+  if(!window.crypto||!crypto.subtle)throw new Error('webcrypto-unavailable');
+  const dbi=await openRememberKeyDb();
+  try{
+    const existing=await new Promise((resolve,reject)=>{
+      const tx=dbi.transaction('keys','readonly');const req=tx.objectStore('keys').get(REMEMBERED_LOGIN_KEY_ID);
+      req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error||new Error('remember-key-read-failed'));
+    });
+    if(existing)return existing;
+    const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+    await new Promise((resolve,reject)=>{
+      const tx=dbi.transaction('keys','readwrite');tx.objectStore('keys').put(key,REMEMBERED_LOGIN_KEY_ID);
+      tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error||new Error('remember-key-write-failed'));
+    });
+    return key;
+  }finally{try{dbi.close()}catch{}}
+}
+async function saveRememberedLogin(email,pass){
+  if(!email||!pass){clearRememberedLogin();return;}
+  try{
+    const key=await getRememberCryptoKey(),iv=crypto.getRandomValues(new Uint8Array(12));
+    const plain=new TextEncoder().encode(JSON.stringify({email:String(email),pass:String(pass)}));
+    const encrypted=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
+    localStorage.setItem(REMEMBERED_LOGIN_STORAGE_KEY,JSON.stringify({v:2,iv:bytesToBase64(iv),data:bytesToBase64(encrypted)}));
+  }catch{
+    try{localStorage.setItem(REMEMBERED_LOGIN_STORAGE_KEY,JSON.stringify({v:2,email:String(email),noPassword:true}))}catch{}
+  }
+}
+function clearRememberedLogin(){try{localStorage.removeItem(REMEMBERED_LOGIN_STORAGE_KEY)}catch{}}
+async function loadRememberedLogin(){
+  let raw=null;try{raw=localStorage.getItem(REMEMBERED_LOGIN_STORAGE_KEY)}catch{}
+  if(!raw)return null;
+  try{
+    const payload=JSON.parse(raw);
+    if(payload?.noPassword)return payload.email?{email:String(payload.email),pass:''}:null;
+    if(!payload||payload.v!==2||!payload.iv||!payload.data)return null;
+    const key=await getRememberCryptoKey();
+    const plainBuf=await crypto.subtle.decrypt({name:'AES-GCM',iv:base64ToBytes(payload.iv)},key,base64ToBytes(payload.data));
+    const data=JSON.parse(new TextDecoder().decode(plainBuf));
+    return data?.email?{email:String(data.email),pass:String(data.pass||'')}:null;
+  }catch{clearRememberedLogin();return null;}
+}
+async function storeNativePasswordCredential(email,pass){
+  if(!email||!pass)return;
+  try{
+    if(window.PasswordCredential&&navigator.credentials?.store){
+      await navigator.credentials.store(new PasswordCredential({id:email,password:pass,name:'Decor Shargh'}));
+    }
+  }catch{}
+}
+async function applyRememberPreference(email,pass,remember,role){
+  if(role==='admin'||!remember){clearRememberedLogin();return;}
+  await saveRememberedLogin(email,pass);storeNativePasswordCredential(email,pass);
+}
+async function hydrateRememberedLogin(){
+  const emailEl=document.getElementById('loginEmail'),passEl=document.getElementById('loginPassword'),rememberEl=document.getElementById('rememberMe');
+  if(!emailEl||!passEl||!rememberEl)return;
+  const saved=await loadRememberedLogin();if(!saved)return;
+  if(!emailEl.value)emailEl.value=saved.email||'';
+  if(!passEl.value&&saved.pass)passEl.value=saved.pass;
+  rememberEl.checked=!!(saved.email&&saved.pass);
+}
+function stopProfileSync(){if(profileUnsub){try{profileUnsub()}catch{}profileUnsub=null;}}
+async function ensureOwnProfile(user){
+  const ref=db.collection('users').doc(user.uid);const snap=await ref.get();
+  if(snap.exists)return snap;
+  await ref.set({
+    email:user.email||'',
+    name:(user.email||'').split('@')[0]||'کاربر',
+    role:'pending',
+    active:false,
+    requestedAt:firebase.firestore.FieldValue.serverTimestamp(),
+    createdAt:firebase.firestore.FieldValue.serverTimestamp()
+  },{merge:false});
+  return ref.get();
+}
+async function applyPendingRemember(role,user){
+  if(!pendingRememberIntent){
+    if(role==='admin')clearRememberedLogin();
+    return;
+  }
+  const intent=pendingRememberIntent;pendingRememberIntent=null;
+  await applyRememberPreference(intent.email||user?.email||'',intent.pass||'',intent.remember===true,role);
+}
+async function routeUserByProfile(user,profile){
+  currentUserProfile={uid:user.uid,email:user.email||profile?.email||'',...(profile||{})};
+  const role=profile?.role||'pending',active=profile?.active===true;
+  await applyPendingRemember(role,user);
+  if(role==='admin'&&active){
+    currentAdmin=currentUserProfile;
+    await initLibraryFirestore();
+    await initContractsFirestore();
+    showApp();return;
+  }
+  currentAdmin=null;stopLibrarySync();stopContractSync();
+  if(role==='blocked'||profile?.blocked===true){showBlocked();return;}
+  showPending(profile,user);
+}
+async function watchOwnProfile(user){
+  stopProfileSync();
+  const ref=db.collection('users').doc(user.uid);
+  profileUnsub=ref.onSnapshot(async snap=>{
+    try{
+      if(!snap.exists){
+        const created=await ensureOwnProfile(user);
+        await routeUserByProfile(user,created.data()||{});return;
+      }
+      await routeUserByProfile(user,snap.data()||{});
+    }catch(err){showLogin(authErrorMessage(err));}
+  },err=>showLogin(authErrorMessage(err)));
 }
 async function initFirebaseAuth(){
   if(typeof firebase==='undefined'){
-    authResolved=true;
-    showLogin('کتابخانه Firebase بارگذاری نشد. دسترسی شبکه به Firebase را بررسی کنید.');
-    return;
+    authResolved=true;showLogin('کتابخانه Firebase بارگذاری نشد. دسترسی شبکه به Firebase را بررسی کنید.');return;
   }
   try{
     if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
-    auth=firebase.auth();
-    db=firebase.firestore();
+    auth=firebase.auth();db=firebase.firestore();
     try{await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)}catch{}
+    await hydrateRememberedLogin();
     auth.onAuthStateChanged(async user=>{
-      if(!user){
-        authResolved=true;
-        currentAdmin=null;
-        stopLibrarySync();
-        stopContractSync();
-        showLogin();
-        setAuthMessage('ایمیل و رمز عبور ادمین را وارد کنید.');
-        return;
-      }
-      try{
-        await verifyAdmin(user);
-        await initLibraryFirestore();
-        await initContractsFirestore();
-        authResolved=true;
-        showApp();
-      }catch(err){
-        authResolved=true;
-        currentAdmin=null;
-        await auth.signOut().catch(()=>{});
-        showLogin(authErrorMessage(err));
-      }
-    },err=>{
       authResolved=true;
-      showLogin(authErrorMessage(err));
-    });
-  }catch(err){
-    authResolved=true;
-    showLogin(authErrorMessage(err));
-  }
+      if(!user){
+        currentAdmin=null;currentUserProfile=null;stopProfileSync();stopLibrarySync();stopContractSync();showLogin();
+        setAuthMessage('ایمیل و رمز عبور را وارد کنید.');return;
+      }
+      try{await ensureOwnProfile(user);await watchOwnProfile(user);}
+      catch(err){showLogin(authErrorMessage(err));}
+    },err=>{authResolved=true;showLogin(authErrorMessage(err));});
+  }catch(err){authResolved=true;showLogin(authErrorMessage(err));}
 }
 
 
@@ -574,6 +707,93 @@ function libraryPrompt(cat=null,act=null){
   }
 }
 
+
+const BACKUP_COLLECTIONS=['contracts','activityCategories','activityLibrary','appMeta','users'];
+let pendingRestorePayload=null;
+function serializeFirestoreValue(value){
+  if(value===null||value===undefined)return value??null;
+  if(typeof firebase!=='undefined'&&firebase.firestore?.Timestamp&&value instanceof firebase.firestore.Timestamp){
+    return {__type:'timestamp',seconds:value.seconds,nanoseconds:value.nanoseconds};
+  }
+  if(Array.isArray(value))return value.map(serializeFirestoreValue);
+  if(typeof value==='object'){const out={};Object.entries(value).forEach(([k,v])=>out[k]=serializeFirestoreValue(v));return out;}
+  return value;
+}
+function deserializeFirestoreValue(value){
+  if(value===null||value===undefined)return value??null;
+  if(Array.isArray(value))return value.map(deserializeFirestoreValue);
+  if(typeof value==='object'){
+    if(value.__type==='timestamp'&&Number.isFinite(value.seconds))return new firebase.firestore.Timestamp(value.seconds,Number(value.nanoseconds)||0);
+    const out={};Object.entries(value).forEach(([k,v])=>out[k]=deserializeFirestoreValue(v));return out;
+  }
+  return value;
+}
+async function collectBackupPayload(){
+  const collections={};
+  for(const name of BACKUP_COLLECTIONS){
+    const snap=await db.collection(name).get();
+    collections[name]=snap.docs.map(d=>({id:d.id,data:serializeFirestoreValue(d.data())}));
+  }
+  return {format:'decor-shargh-firestore-backup',schemaVersion:1,projectId:firebaseConfig.projectId,appVersion:APP_VERSION,exportedAt:new Date().toISOString(),collections};
+}
+function persianFileDate(){
+  try{return new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()).replace(/[\/\\]/g,'-').replace(/\s/g,'');}
+  catch{return new Date().toISOString().slice(0,10);}
+}
+function downloadJsonFile(payload,prefix='decor-shargh-backup'){
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${prefix}-${persianFileDate()}.json`;
+  document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+async function downloadBackup(prefix='decor-shargh-backup'){
+  if(!db||!currentAdmin)throw new Error('not-ready');
+  const payload=await collectBackupPayload();downloadJsonFile(payload,prefix);return payload;
+}
+function validateBackupPayload(payload){
+  if(!payload||payload.format!=='decor-shargh-firestore-backup')throw new Error('این فایل، بکاپ معتبر دکوراسیون شرق نیست.');
+  if(payload.projectId!==firebaseConfig.projectId)throw new Error('این بکاپ متعلق به پروژه Firebase دیگری است.');
+  if(!payload.collections||typeof payload.collections!=='object')throw new Error('ساختار بکاپ ناقص است.');
+  return true;
+}
+function restoreSummaryHtml(payload){
+  const rows=BACKUP_COLLECTIONS.map(name=>`<div class="restore-count-row"><span>${name}</span><strong>${toFa((payload.collections[name]||[]).length)}</strong></div>`).join('');
+  return `<div class="danger-note">بازیابی، اطلاعات فعلی کالکشن‌های زیر را با محتوای فایل جایگزین می‌کند. قبل از شروع، بکاپ اضطراری فعلی به‌صورت خودکار دانلود می‌شود.</div><div class="restore-counts">${rows}</div><div class="form-actions"><button type="button" class="secondary" id="cancelRestoreBtn">انصراف</button><button type="button" class="danger" id="confirmRestoreBtn">تأیید و شروع بازیابی</button></div>`;
+}
+async function commitOpsInChunks(opsBuilder){
+  let batch=db.batch(),count=0;
+  async function flush(){if(count){await batch.commit();batch=db.batch();count=0;}}
+  await opsBuilder({add(ref,type,data){if(type==='delete')batch.delete(ref);else batch.set(ref,data);count++;},flush,shouldFlush(){return count>=400;}});
+  await flush();
+}
+async function replaceCollectionFromBackup(name,docs){
+  const existing=await db.collection(name).get();
+  const protectedId=(name==='users'&&currentAdmin?.uid)?currentAdmin.uid:null;
+  await commitOpsInChunks(async h=>{
+    for(const d of existing.docs){
+      if(protectedId&&d.id===protectedId)continue;
+      h.add(d.ref,'delete');if(h.shouldFlush())await h.flush();
+    }
+  });
+  await commitOpsInChunks(async h=>{
+    for(const item of docs||[]){
+      if(!item?.id||(protectedId&&item.id===protectedId))continue;
+      h.add(db.collection(name).doc(item.id),'set',deserializeFirestoreValue(item.data||{}));if(h.shouldFlush())await h.flush();
+    }
+  });
+}
+async function restoreBackup(payload){
+  validateBackupPayload(payload);
+  const adminSnap=await db.collection('users').doc(currentAdmin.uid).get();
+  const adminSafety=adminSnap.exists?adminSnap.data():{email:currentAdmin.email||'',name:currentAdmin.name||'',role:'admin',active:true};
+  for(const name of BACKUP_COLLECTIONS)await replaceCollectionFromBackup(name,payload.collections[name]||[]);
+  await db.collection('users').doc(currentAdmin.uid).set({...adminSafety,email:currentAdmin.email||adminSafety.email||'',role:'admin',active:true,updatedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+}
+function openBackupModal(){
+  pendingRestorePayload=null;
+  document.getElementById('restorePreview')?.classList.add('is-hidden');
+  openModal('backupModal');
+}
+
 // Global events
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>openContractForm();
@@ -615,25 +835,88 @@ document.getElementById('libraryList').addEventListener('click',async e=>{
 });
 
 
+
 const loginFormEl=document.getElementById('loginForm');
 if(loginFormEl)loginFormEl.addEventListener('submit',async e=>{
   e.preventDefault();
   if(!auth){setAuthMessage('Firebase در دسترس نیست.','error');return;}
-  const email=document.getElementById('loginEmail').value.trim();
-  const password=document.getElementById('loginPassword').value;
-  const btn=document.getElementById('loginBtn');
-  btn.disabled=true;btn.textContent='در حال ورود...';setAuthMessage('در حال اتصال...');
+  const email=document.getElementById('loginEmail').value.trim(),password=document.getElementById('loginPassword').value;
+  const remember=document.getElementById('rememberMe')?.checked===true,btn=document.getElementById('loginBtn'),signup=document.getElementById('signupBtn');
+  if(!email||password.length<6){setAuthMessage('ایمیل و رمز حداقل ۶ کاراکتری را وارد کنید.','error');return;}
+  pendingRememberIntent={email,pass:password,remember};
+  btn.disabled=true;if(signup)signup.disabled=true;btn.textContent='در حال ورود...';setAuthMessage('در حال اتصال...');
   try{await auth.signInWithEmailAndPassword(email,password);}
-  catch(err){setAuthMessage(authErrorMessage(err),'error');}
-  finally{btn.disabled=false;btn.textContent='ورود';}
+  catch(err){pendingRememberIntent=null;setAuthMessage(authErrorMessage(err),'error');}
+  finally{btn.disabled=false;if(signup)signup.disabled=false;btn.textContent='ورود';}
 });
-const logoutBtn=document.getElementById('logoutBtn');
-if(logoutBtn)logoutBtn.addEventListener('click',async()=>{
+const signupBtn=document.getElementById('signupBtn');
+if(signupBtn)signupBtn.addEventListener('click',async()=>{
+  if(!auth||!db){setAuthMessage('Firebase در دسترس نیست.','error');return;}
+  const email=document.getElementById('loginEmail').value.trim(),password=document.getElementById('loginPassword').value;
+  const remember=document.getElementById('rememberMe')?.checked===true;
+  if(!email||password.length<6){setAuthMessage('برای ساخت حساب، ایمیل و یک رمز حداقل ۶ کاراکتری وارد کنید.','error');return;}
+  const loginBtn=document.getElementById('loginBtn');
+  signupBtn.disabled=true;loginBtn.disabled=true;signupBtn.textContent='در حال ساخت حساب...';setAuthMessage('در حال ساخت حساب جدید...');signupInProgress=true;
+  let createdUser=null;
+  try{
+    pendingRememberIntent={email,pass:password,remember};
+    const cred=await auth.createUserWithEmailAndPassword(email,password);createdUser=cred.user;
+    await ensureOwnProfile(createdUser);
+    setAuthMessage('حساب ساخته شد و در انتظار تأیید مدیر است.','success');
+  }catch(err){
+    pendingRememberIntent=null;
+    if(createdUser){try{await createdUser.delete()}catch{}}
+    setAuthMessage(authErrorMessage(err),'error');
+    if(auth.currentUser&&signupInProgress){await auth.signOut().catch(()=>{})}
+  }finally{
+    signupInProgress=false;signupBtn.disabled=false;loginBtn.disabled=false;signupBtn.textContent='ساخت حساب جدید';
+  }
+});
+document.getElementById('togglePasswordBtn')?.addEventListener('click',()=>{
+  const input=document.getElementById('loginPassword'),btn=document.getElementById('togglePasswordBtn');
+  const show=input.type==='password';input.type=show?'text':'password';btn.textContent=show?'◌':'◉';btn.setAttribute('aria-label',show?'پنهان کردن رمز':'نمایش رمز');
+});
+async function doLogout(){
   if(!auth)return;
-  logoutBtn.disabled=true;
-  try{await auth.signOut();}
-  finally{logoutBtn.disabled=false;}
+  const role=currentUserProfile?.role||'';
+  stopProfileSync();await auth.signOut();
+  const email=document.getElementById('loginEmail'),pass=document.getElementById('loginPassword'),remember=document.getElementById('rememberMe');
+  if(role==='admin'){clearRememberedLogin();if(email)email.value='';if(pass)pass.value='';if(remember)remember.checked=false;}
+  else{if(pass)pass.value='';await hydrateRememberedLogin();}
+}
+const logoutBtn=document.getElementById('logoutBtn');
+if(logoutBtn)logoutBtn.addEventListener('click',async()=>{logoutBtn.disabled=true;try{await doLogout()}finally{logoutBtn.disabled=false}});
+document.getElementById('pendingLogoutBtn')?.addEventListener('click',doLogout);
+document.getElementById('blockedLogoutBtn')?.addEventListener('click',doLogout);
+
+document.getElementById('openBackupBtn')?.addEventListener('click',openBackupModal);
+document.querySelectorAll('[data-close-backup]').forEach(b=>b.addEventListener('click',()=>closeModal('backupModal')));
+document.getElementById('downloadBackupBtn')?.addEventListener('click',async e=>{
+  const btn=e.currentTarget;btn.disabled=true;btn.textContent='در حال آماده‌سازی...';
+  try{await downloadBackup();toast('فایل بکاپ دانلود شد')}catch{toast('ساخت بکاپ انجام نشد')}
+  finally{btn.disabled=false;btn.textContent='دانلود بکاپ';}
 });
+const restoreFileInput=document.getElementById('restoreFileInput');
+document.getElementById('chooseRestoreFileBtn')?.addEventListener('click',()=>restoreFileInput?.click());
+restoreFileInput?.addEventListener('change',async()=>{
+  const file=restoreFileInput.files?.[0];if(!file)return;
+  const preview=document.getElementById('restorePreview');
+  try{
+    const payload=JSON.parse(await file.text());validateBackupPayload(payload);pendingRestorePayload=payload;
+    preview.innerHTML=restoreSummaryHtml(payload);preview.classList.remove('is-hidden');
+    document.getElementById('cancelRestoreBtn').onclick=()=>{pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';};
+    document.getElementById('confirmRestoreBtn').onclick=async e=>{
+      if(!pendingRestorePayload)return;
+      if(!confirm('بازیابی اطلاعات شروع شود؟ اطلاعات فعلی با محتوای بکاپ جایگزین خواهد شد.'))return;
+      const btn=e.currentTarget;btn.disabled=true;btn.textContent='در حال بازیابی...';
+      try{
+        const emergency=await collectBackupPayload();downloadJsonFile(emergency,'decor-shargh-before-restore');
+        await restoreBackup(pendingRestorePayload);toast('بازیابی با موفقیت انجام شد');pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';closeModal('backupModal');
+      }catch(err){console.error(err);toast(err?.message||'بازیابی انجام نشد');btn.disabled=false;btn.textContent='تأیید و شروع بازیابی';}
+    };
+  }catch(err){pendingRestorePayload=null;preview.classList.add('is-hidden');restoreFileInput.value='';toast(err?.message||'فایل بکاپ معتبر نیست');}
+});
+
 
 async function checkForAppUpdate(){
   try{
