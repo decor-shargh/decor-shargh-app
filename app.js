@@ -12,6 +12,87 @@ let auth=null;
 let db=null;
 let currentAdmin=null;
 let appStarted=false;
+let libraryReady=false;
+let libraryCategoryDocs=[];
+let libraryActivityDocs=[];
+let libraryUnsubs=[];
+
+let authResolved=false;
+let deferredInstallPrompt=null;
+let installPromptShownThisSession=false;
+let installUiReady=false;
+
+function hideBootSplash(){
+  const splash=document.getElementById('bootSplash');
+  if(!splash)return;
+  splash.classList.add('is-hidden');
+  installUiReady=true;
+  window.setTimeout(()=>maybeShowInstallPrompt(),180);
+}
+function isStandaloneMode(){
+  return window.matchMedia?.('(display-mode: standalone)').matches===true || window.navigator.standalone===true;
+}
+function isIosDevice(){
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+}
+function hideInstallPrompt(){
+  const sheet=document.getElementById('installPrompt');
+  if(!sheet)return;
+  sheet.classList.add('is-hidden');
+  sheet.setAttribute('aria-hidden','true');
+}
+function maybeShowInstallPrompt(){
+  if(!installUiReady || isStandaloneMode() || installPromptShownThisSession)return;
+  const sheet=document.getElementById('installPrompt');
+  const btn=document.getElementById('installAppBtn');
+  const text=document.getElementById('installText');
+  if(!sheet||!btn||!text)return;
+  if(deferredInstallPrompt){
+    text.textContent='برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.';
+    btn.textContent='نصب اپلیکیشن';
+  }else if(isIosDevice()){
+    text.textContent='در Safari روی دکمه Share بزن و «Add to Home Screen» را انتخاب کن.';
+    btn.textContent='متوجه شدم';
+  }else{
+    return;
+  }
+  installPromptShownThisSession=true;
+  sheet.classList.remove('is-hidden');
+  sheet.setAttribute('aria-hidden','false');
+}
+async function triggerInstall(){
+  if(deferredInstallPrompt){
+    const prompt=deferredInstallPrompt;
+    deferredInstallPrompt=null;
+    hideInstallPrompt();
+    try{
+      await prompt.prompt();
+      await prompt.userChoice;
+    }catch{}
+    return;
+  }
+  hideInstallPrompt();
+}
+function setupPwaInstall(){
+  window.addEventListener('beforeinstallprompt',e=>{
+    e.preventDefault();
+    deferredInstallPrompt=e;
+    maybeShowInstallPrompt();
+  });
+  window.addEventListener('appinstalled',()=>{
+    deferredInstallPrompt=null;
+    hideInstallPrompt();
+    try{localStorage.setItem('decorSharghPwaInstalled','1')}catch{}
+  });
+  document.getElementById('installAppBtn')?.addEventListener('click',triggerInstall);
+  document.getElementById('dismissInstallBtn')?.addEventListener('click',hideInstallPrompt);
+  document.querySelectorAll('[data-install-dismiss]').forEach(el=>el.addEventListener('click',hideInstallPrompt));
+  if('serviceWorker' in navigator){
+    window.addEventListener('load',()=>{
+      navigator.serviceWorker.register('./service-worker.js',{scope:'./'}).then(reg=>reg.update()).catch(()=>{});
+    });
+  }
+}
 
 function authEls(){
   return {
@@ -34,12 +115,14 @@ function showLogin(message=''){
   const e=authEls();
   e.shell?.classList.add('is-hidden');
   e.gate?.classList.remove('is-hidden');
+  hideBootSplash();
   if(message)setAuthMessage(message,'error');
 }
 function showApp(){
   const e=authEls();
   e.gate?.classList.add('is-hidden');
   e.shell?.classList.remove('is-hidden');
+  hideBootSplash();
   if(!appStarted){appStarted=true;renderAll();}
   else renderAll();
 }
@@ -60,8 +143,9 @@ async function verifyAdmin(user){
   currentAdmin={uid:user.uid,email:user.email||profile.email||'',...profile};
   return currentAdmin;
 }
-function initFirebaseAuth(){
+async function initFirebaseAuth(){
   if(typeof firebase==='undefined'){
+    authResolved=true;
     showLogin('کتابخانه Firebase بارگذاری نشد. دسترسی شبکه به Firebase را بررسی کنید.');
     return;
   }
@@ -69,15 +153,37 @@ function initFirebaseAuth(){
     if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
     auth=firebase.auth();
     db=firebase.firestore();
-    auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+    try{await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)}catch{}
     auth.onAuthStateChanged(async user=>{
-      if(!user){currentAdmin=null;showLogin();setAuthMessage('ایمیل و رمز عبور ادمین را وارد کنید.');return;}
-      setAuthMessage('در حال بررسی دسترسی ادمین...');
-      try{await verifyAdmin(user);showApp();}
-      catch(err){currentAdmin=null;await auth.signOut().catch(()=>{});showLogin(authErrorMessage(err));}
+      if(!user){
+        authResolved=true;
+        currentAdmin=null;
+        stopLibrarySync();
+        showLogin();
+        setAuthMessage('ایمیل و رمز عبور ادمین را وارد کنید.');
+        return;
+      }
+      try{
+        await verifyAdmin(user);
+        await initLibraryFirestore();
+        authResolved=true;
+        showApp();
+      }catch(err){
+        authResolved=true;
+        currentAdmin=null;
+        await auth.signOut().catch(()=>{});
+        showLogin(authErrorMessage(err));
+      }
+    },err=>{
+      authResolved=true;
+      showLogin(authErrorMessage(err));
     });
-  }catch(err){showLogin(authErrorMessage(err));}
+  }catch(err){
+    authResolved=true;
+    showLogin(authErrorMessage(err));
+  }
 }
+
 
 const STORAGE_KEY='decorSharghAdminV1';
 const faDigits='۰۱۲۳۴۵۶۷۸۹';
@@ -97,10 +203,120 @@ const initialLibrary=[
 
 function score(v,l,c){return +(v*.4+l*.35+c*.25).toFixed(2)}
 function uid(prefix='id'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8)}
-function freshState(){return {contracts:[],library:initialLibrary.map((c,ci)=>({id:uid('cat'),name:c.name,items:c.items.map(i=>({id:uid('act'),name:i[0],volume:i[1],cost:i[2],duration:i[3],score:score(i[1],i[2],i[3])}))}))}}
+function freshState(){return {contracts:[],library:[]}}
 let state=load();
-function load(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return s&&s.library?s:freshState()}catch{return freshState()}}
-function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
+function load(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return {contracts:Array.isArray(s?.contracts)?s.contracts:[],library:[]}}catch{return freshState()}}
+function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify({contracts:state.contracts}))}
+
+const LIB_CAT_COLLECTION='activityCategories';
+const LIB_ACT_COLLECTION='activityLibrary';
+const LIB_META_DOC='appMeta/activityLibrary';
+
+function stopLibrarySync(){
+  libraryUnsubs.forEach(fn=>{try{fn()}catch{}});
+  libraryUnsubs=[];
+  libraryReady=false;
+}
+function firestoreErrorMessage(err){
+  const code=err?.code||'';
+  if(code.includes('permission-denied'))return 'دسترسی به کتابخانه در Firestore مجاز نیست.';
+  if(code.includes('unavailable')||code.includes('network'))return 'ارتباط با Firestore برقرار نشد.';
+  return 'ذخیره‌سازی در Firestore انجام نشد.';
+}
+function rebuildLibraryFromRemote(){
+  const cats=[...libraryCategoryDocs].filter(x=>x.active!==false).sort((a,b)=>(a.order??0)-(b.order??0)||String(a.name||'').localeCompare(String(b.name||''),'fa'));
+  const acts=[...libraryActivityDocs].filter(x=>x.active!==false).sort((a,b)=>(a.order??0)-(b.order??0)||String(a.name||'').localeCompare(String(b.name||''),'fa'));
+  state.library=cats.map(cat=>({
+    id:cat.id,
+    name:cat.name,
+    order:cat.order??0,
+    items:acts.filter(a=>a.categoryId===cat.id).map(a=>({
+      id:a.id,
+      name:a.name,
+      categoryId:a.categoryId,
+      volume:Number(a.volume)||0,
+      cost:Number(a.cost)||0,
+      duration:Number(a.duration)||0,
+      score:Number(a.score)||score(Number(a.volume)||0,Number(a.cost)||0,Number(a.duration)||0),
+      order:a.order??0
+    }))
+  }));
+  libraryReady=true;
+  if(document.getElementById('libraryList'))renderLibrary();
+}
+async function seedInitialLibraryIfNeeded(){
+  const metaRef=db.doc(LIB_META_DOC);
+  const meta=await metaRef.get();
+  if(meta.exists)return;
+  const existing=await db.collection(LIB_CAT_COLLECTION).limit(1).get();
+  if(!existing.empty){
+    await metaRef.set({seeded:true,seededAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+    return;
+  }
+  const batch=db.batch();
+  let activityCounter=1;
+  initialLibrary.forEach((cat,ci)=>{
+    const catId=`cat_${String(ci+1).padStart(2,'0')}`;
+    batch.set(db.collection(LIB_CAT_COLLECTION).doc(catId),{
+      name:cat.name,order:ci+1,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+    });
+    cat.items.forEach((item,ai)=>{
+      const actId=`act_${String(activityCounter++).padStart(3,'0')}`;
+      const [name,volume,cost,duration]=item;
+      batch.set(db.collection(LIB_ACT_COLLECTION).doc(actId),{
+        name,categoryId:catId,volume,cost,duration,score:score(volume,cost,duration),order:ai+1,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()
+      });
+    });
+  });
+  batch.set(metaRef,{seeded:true,version:1,seededAt:firebase.firestore.FieldValue.serverTimestamp()});
+  await batch.commit();
+}
+async function loadLibraryOnce(){
+  const [catsSnap,actsSnap]=await Promise.all([db.collection(LIB_CAT_COLLECTION).get(),db.collection(LIB_ACT_COLLECTION).get()]);
+  libraryCategoryDocs=catsSnap.docs.map(d=>({id:d.id,...d.data()}));
+  libraryActivityDocs=actsSnap.docs.map(d=>({id:d.id,...d.data()}));
+  rebuildLibraryFromRemote();
+}
+function startLibrarySync(){
+  stopLibrarySync();
+  libraryUnsubs.push(db.collection(LIB_CAT_COLLECTION).onSnapshot(snap=>{
+    libraryCategoryDocs=snap.docs.map(d=>({id:d.id,...d.data()}));
+    rebuildLibraryFromRemote();
+  },err=>toast(firestoreErrorMessage(err))));
+  libraryUnsubs.push(db.collection(LIB_ACT_COLLECTION).onSnapshot(snap=>{
+    libraryActivityDocs=snap.docs.map(d=>({id:d.id,...d.data()}));
+    rebuildLibraryFromRemote();
+  },err=>toast(firestoreErrorMessage(err))));
+}
+async function initLibraryFirestore(){
+  if(!db)return;
+  await seedInitialLibraryIfNeeded();
+  await loadLibraryOnce();
+  startLibrarySync();
+}
+async function createCategoryRemote(name){
+  const nextOrder=(libraryCategoryDocs.reduce((m,x)=>Math.max(m,Number(x.order)||0),0)||0)+1;
+  await db.collection(LIB_CAT_COLLECTION).add({name,order:nextOrder,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+}
+async function updateCategoryRemote(id,name){
+  await db.collection(LIB_CAT_COLLECTION).doc(id).update({name,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
+}
+async function deleteCategoryRemote(id){
+  await db.collection(LIB_CAT_COLLECTION).doc(id).delete();
+}
+async function createActivityRemote(catId,data){
+  const inCat=libraryActivityDocs.filter(x=>x.categoryId===catId);
+  const nextOrder=(inCat.reduce((m,x)=>Math.max(m,Number(x.order)||0),0)||0)+1;
+  const payload={...data,categoryId:catId,score:score(data.volume,data.cost,data.duration),order:nextOrder,active:true,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+  await db.collection(LIB_ACT_COLLECTION).add(payload);
+}
+async function updateActivityRemote(id,data){
+  const payload={...data,score:score(data.volume,data.cost,data.duration),updatedAt:firebase.firestore.FieldValue.serverTimestamp()};
+  await db.collection(LIB_ACT_COLLECTION).doc(id).update(payload);
+}
+async function deleteActivityRemote(id){
+  await db.collection(LIB_ACT_COLLECTION).doc(id).delete();
+}
 function toFa(v){return String(v).replace(/\d/g,d=>faDigits[d])}
 function toEn(v=''){return String(v).replace(/[۰-۹]/g,d=>faDigits.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d))}
 function money(v){const n=Number(toEn(v).replace(/,/g,''))||0;return toFa(n.toLocaleString('en-US'))+' تومان'}
@@ -143,7 +359,7 @@ function renderCharts(active){const pc=document.getElementById('progressChart');
 
 function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDate(b.contractDate)||0)-(jalaliToDate(a.contractDate)||0));const name=document.getElementById('filterCustomer').value.trim();const from=normalizeDate(document.getElementById('filterFrom').value);const to=normalizeDate(document.getElementById('filterTo').value);const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>c.customerName.includes(name));if(st)arr=arr.filter(c=>c.status===st);if(from){const fd=jalaliToDate(from);arr=arr.filter(c=>(jalaliToDate(c.contractDate)||0)>=fd)}if(to){const td=jalaliToDate(to);arr=arr.filter(c=>(jalaliToDate(c.contractDate)||0)<=td)}document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
 
-function renderLibrary(){document.getElementById('libraryList').innerHTML=state.library.map(cat=>`<section class="category-card"><div class="category-head"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div>${cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty">فعالیتی در این دسته نیست.</div>'}</section>`).join('')}
+function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>`<section class="category-card"><div class="category-head"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div>${cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty">فعالیتی در این دسته نیست.</div>'}</section>`).join('')}
 
 function renderAll(){state.contracts.forEach(syncAutoCompleted);save();renderHome();renderContracts();renderLibrary()}
 function switchView(name){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));if(name==='contracts')renderContracts();if(name==='library')renderLibrary();window.scrollTo({top:0,behavior:'smooth'})}
@@ -168,7 +384,30 @@ function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);co
 function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=e=>{e.preventDefault();if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d)return toast('علت و تاریخ الزامی است');c.statusReason=r;c.statusDate=d}c.status=sel.value;save();closeModal('promptModal');openDetail(c.id);renderAll()}}
 function showPrompt(title,html){document.getElementById('promptTitle').textContent=title;document.getElementById('promptBody').innerHTML=html;openModal('promptModal');document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'))}
 
-function libraryPrompt(cat=null,act=null){if(act){showPrompt('ویرایش فعالیت',`<form id="libActForm"><label>نام فعالیت<input id="laName" value="${escapeHtml(act.name)}" required></label><div class="status-form"><label>حجم کار (۱ تا ۱۰)<input id="laVolume" type="number" min="1" max="10" value="${act.volume}" required></label><label>هزینه (۱ تا ۱۰)<input id="laCost" type="number" min="1" max="10" value="${act.cost}" required></label><label>مدت (۱ تا ۱۰)<input id="laDuration" type="number" min="1" max="10" value="${act.duration}" required></label><label>ضریب نهایی<input value="${act.score}" disabled></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('libActForm').onsubmit=e=>{e.preventDefault();act.name=laName.value.trim();act.volume=+laVolume.value;act.cost=+laCost.value;act.duration=+laDuration.value;act.score=score(act.volume,act.cost,act.duration);save();closeModal('promptModal');renderLibrary();toast('فعالیت ویرایش شد')}}else{showPrompt('افزودن فعالیت',`<form id="libActForm"><label>نام فعالیت<input id="laName" required></label><div class="status-form"><label>حجم کار (۱ تا ۱۰)<input id="laVolume" type="number" min="1" max="10" value="5" required></label><label>هزینه (۱ تا ۱۰)<input id="laCost" type="number" min="1" max="10" value="5" required></label><label>مدت (۱ تا ۱۰)<input id="laDuration" type="number" min="1" max="10" value="5" required></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">اضافه کردن</button></div></form>`);document.getElementById('libActForm').onsubmit=e=>{e.preventDefault();const v=+laVolume.value,l=+laCost.value,d=+laDuration.value;cat.items.push({id:uid('act'),name:laName.value.trim(),volume:v,cost:l,duration:d,score:score(v,l,d)});save();closeModal('promptModal');renderLibrary();toast('فعالیت اضافه شد')}}}
+function libraryPrompt(cat=null,act=null){
+  const categoryOptions=state.library.map(c=>`<option value="${c.id}" ${act?.categoryId===c.id||(!act&&cat?.id===c.id)?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+  if(act){
+    showPrompt('ویرایش فعالیت',`<form id="libActForm"><label>نام فعالیت<input id="laName" value="${escapeHtml(act.name)}" required></label><label>دسته<select id="laCategory">${categoryOptions}</select></label><div class="status-form"><label>حجم کار (۱ تا ۱۰)<input id="laVolume" type="number" min="1" max="10" value="${act.volume}" required></label><label>هزینه (۱ تا ۱۰)<input id="laCost" type="number" min="1" max="10" value="${act.cost}" required></label><label>مدت (۱ تا ۱۰)<input id="laDuration" type="number" min="1" max="10" value="${act.duration}" required></label><label>ضریب نهایی<input value="${act.score}" disabled></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);
+    document.getElementById('libActForm').onsubmit=async e=>{
+      e.preventDefault();
+      const btn=e.submitter; if(btn)btn.disabled=true;
+      try{
+        await updateActivityRemote(act.id,{name:document.getElementById('laName').value.trim(),categoryId:document.getElementById('laCategory').value,volume:+document.getElementById('laVolume').value,cost:+document.getElementById('laCost').value,duration:+document.getElementById('laDuration').value});
+        closeModal('promptModal');toast('فعالیت در Firestore ویرایش شد');
+      }catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false;}
+    };
+  }else{
+    showPrompt('افزودن فعالیت',`<form id="libActForm"><label>نام فعالیت<input id="laName" required></label><label>دسته<select id="laCategory">${categoryOptions}</select></label><div class="status-form"><label>حجم کار (۱ تا ۱۰)<input id="laVolume" type="number" min="1" max="10" value="5" required></label><label>هزینه (۱ تا ۱۰)<input id="laCost" type="number" min="1" max="10" value="5" required></label><label>مدت (۱ تا ۱۰)<input id="laDuration" type="number" min="1" max="10" value="5" required></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">اضافه کردن</button></div></form>`);
+    document.getElementById('libActForm').onsubmit=async e=>{
+      e.preventDefault();
+      const btn=e.submitter; if(btn)btn.disabled=true;
+      try{
+        await createActivityRemote(document.getElementById('laCategory').value,{name:document.getElementById('laName').value.trim(),volume:+document.getElementById('laVolume').value,cost:+document.getElementById('laCost').value,duration:+document.getElementById('laDuration').value});
+        closeModal('promptModal');toast('فعالیت در Firestore اضافه شد');
+      }catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false;}
+    };
+  }
+}
 
 // Global events
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
@@ -176,8 +415,39 @@ document.getElementById('newContractBtn').onclick=()=>openContractForm();
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
 document.getElementById('contractForm').onsubmit=e=>{e.preventDefault();const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim()};if(!data.contractDate||!data.endDate)return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید');const id=contractId.value;if(id){Object.assign(getContract(id),data);toast('قرارداد ویرایش شد')}else state.contracts.push({id:uid('c'),...data,status:'active',activities:[],createdAt:new Date().toISOString()});save();closeModal('contractModal');renderAll();switchView('contracts')};
 ['filterCustomer','filterFrom','filterTo','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterFrom.value='';filterTo.value='';filterStatus.value='';renderContracts()};
-document.getElementById('addCategoryBtn').onclick=()=>{showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);document.getElementById('catForm').onsubmit=e=>{e.preventDefault();state.library.push({id:uid('cat'),name:catName.value.trim(),items:[]});save();closeModal('promptModal');renderLibrary()}};
-document.getElementById('libraryList').addEventListener('click',e=>{let b=e.target.closest('[data-lib-add]');if(b)return libraryPrompt(state.library.find(c=>c.id===b.dataset.libAdd));b=e.target.closest('[data-lib-edit-cat]');if(b){const cat=state.library.find(c=>c.id===b.dataset.libEditCat);showPrompt('ویرایش دسته',`<form id="editCat"><label>نام دسته<input id="editCatName" value="${escapeHtml(cat.name)}" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);editCat.onsubmit=ev=>{ev.preventDefault();cat.name=editCatName.value.trim();save();closeModal('promptModal');renderLibrary()};return}b=e.target.closest('[data-lib-del-cat]');if(b){const cat=state.library.find(c=>c.id===b.dataset.libDelCat);if(cat.items.length)return toast('اول فعالیت‌های این دسته را حذف یا منتقل کنید');if(confirm(`دسته «${cat.name}» حذف شود؟`)){state.library=state.library.filter(c=>c.id!==cat.id);save();renderLibrary()}return}b=e.target.closest('[data-lib-edit-act]');if(b){const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libEditAct);libraryPrompt(cat,act);return}b=e.target.closest('[data-lib-del-act]');if(b){const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libDelAct);if(confirm(`فعالیت «${act.name}» از کتابخانه حذف شود؟\nقراردادهای قبلی تغییر نمی‌کنند.`)){cat.items=cat.items.filter(a=>a.id!==act.id);save();renderLibrary();toast('از کتابخانه حذف شد')}return}});
+document.getElementById('addCategoryBtn').onclick=()=>{
+  showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
+  document.getElementById('catForm').onsubmit=async e=>{
+    e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;
+    try{await createCategoryRemote(document.getElementById('catName').value.trim());closeModal('promptModal');toast('دسته در Firestore ایجاد شد')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false;}
+  };
+};
+document.getElementById('libraryList').addEventListener('click',async e=>{
+  let b=e.target.closest('[data-lib-add]');
+  if(b)return libraryPrompt(state.library.find(c=>c.id===b.dataset.libAdd));
+  b=e.target.closest('[data-lib-edit-cat]');
+  if(b){
+    const cat=state.library.find(c=>c.id===b.dataset.libEditCat);
+    showPrompt('ویرایش دسته',`<form id="editCat"><label>نام دسته<input id="editCatName" value="${escapeHtml(cat.name)}" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);
+    document.getElementById('editCat').onsubmit=async ev=>{ev.preventDefault();const btn=ev.submitter;if(btn)btn.disabled=true;try{await updateCategoryRemote(cat.id,document.getElementById('editCatName').value.trim());closeModal('promptModal');toast('دسته ویرایش شد')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false;}};
+    return;
+  }
+  b=e.target.closest('[data-lib-del-cat]');
+  if(b){
+    const cat=state.library.find(c=>c.id===b.dataset.libDelCat);
+    if(cat.items.length)return toast('اول فعالیت‌های این دسته را حذف یا منتقل کنید');
+    if(confirm(`دسته «${cat.name}» حذف شود؟`)){try{await deleteCategoryRemote(cat.id);toast('دسته حذف شد')}catch(err){toast(firestoreErrorMessage(err))}}
+    return;
+  }
+  b=e.target.closest('[data-lib-edit-act]');
+  if(b){const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libEditAct);libraryPrompt(cat,act);return}
+  b=e.target.closest('[data-lib-del-act]');
+  if(b){
+    const cat=state.library.find(c=>c.id===b.dataset.cat),act=cat.items.find(a=>a.id===b.dataset.libDelAct);
+    if(confirm(`فعالیت «${act.name}» از کتابخانه حذف شود؟\nقراردادهای قبلی تغییر نمی‌کنند.`)){try{await deleteActivityRemote(act.id);toast('از کتابخانه Firestore حذف شد')}catch(err){toast(firestoreErrorMessage(err))}}
+    return;
+  }
+});
 
 
 const loginFormEl=document.getElementById('loginForm');
@@ -200,4 +470,5 @@ if(logoutBtn)logoutBtn.addEventListener('click',async()=>{
   finally{logoutBtn.disabled=false;}
 });
 
+setupPwaInstall();
 initFirebaseAuth();

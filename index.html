@@ -4,11 +4,42 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#111827" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="دکوراسیون شرق" />
   <title>دکوراسیون شرق | پنل ادمین</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="manifest" href="manifest.webmanifest?v=4" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=4" />
+  <link rel="icon" href="icon-192.png?v=4" />
+  <link rel="stylesheet" href="styles.css?v=4" />
 </head>
 <body>
-  <section id="authGate" class="auth-gate">
+  <section id="bootSplash" class="boot-splash" aria-live="polite">
+    <div class="boot-brand">
+      <div class="boot-logo">DS</div>
+      <div class="boot-name">دکوراسیون شرق</div>
+      <div class="boot-loader" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="boot-text">در حال آماده‌سازی...</div>
+    </div>
+  </section>
+
+  <section id="installPrompt" class="install-sheet is-hidden" aria-hidden="true">
+    <div class="install-backdrop" data-install-dismiss></div>
+    <div class="install-card">
+      <div class="install-icon">DS</div>
+      <div class="install-copy">
+        <h3>نصب اپلیکیشن دکوراسیون شرق</h3>
+        <p id="installText">برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.</p>
+      </div>
+      <div class="install-actions">
+        <button id="installAppBtn" class="primary" type="button">نصب اپلیکیشن</button>
+        <button id="dismissInstallBtn" class="secondary" type="button">فعلاً نه</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="authGate" class="auth-gate is-hidden">
     <div class="auth-card">
       <div class="auth-brand">
         <div class="auth-logo">ش</div>
@@ -182,6 +213,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=4"></script>
 </body>
 </html>

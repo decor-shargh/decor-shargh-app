@@ -1,33 +1,37 @@
-# دکوراسیون شرق — Admin v1
+# دکوراسیون شرق — Admin V3
 
-نسخه اولیه مستقل و موبایل‌محور پنل ادمین، مطابق تصمیمات فعلی پروژه.
+این نسخه پنل Admin دکوراسیون شرق است.
 
-## محدوده فعلی
-- ایجاد و ویرایش قرارداد با: نام مشتری، کد قلم، مبلغ، تاریخ عقد، تاریخ پایان، تاریخ جبرانی، توضیحات اختیاری
-- مرتب‌سازی قراردادها بر اساس تاریخ عقد؛ جدیدترین بالاتر
-- فیلتر بر اساس نام مشتری، بازه تاریخ عقد و وضعیت
-- وضعیت‌ها: فعال، متوقف، فسخ‌شده، خاتمه‌یافته
-- خاتمه خودکار وقتی همه فعالیت‌ها 100٪ شوند
-- هشدار سررسید: 7 تا 4 روز نزدیک، 3 روز تا سررسید و پس از آن بحرانی
-- مبنای سررسید: تاریخ جبرانی در صورت وجود، در غیر این صورت تاریخ پایان
-- کتابخانه قابل ویرایش فعالیت‌ها و دسته‌ها
-- ضریب پایه: 40٪ حجم + 35٪ هزینه + 25٪ مدت
-- وزن هر فعالیت به‌صورت خودکار بین فعالیت‌های همان قرارداد نرمال می‌شود تا جمع 100٪ شود
-- ثبت پیشرفت 0 تا 100 و دکمه تکمیل سریع
-- فعالیت‌های 100٪ در انتهای لیست جزئیات قرار می‌گیرند ولی روی کارت قرارداد همچنان نمایش داده می‌شوند
-- KPIهای خانه، پروژه‌های نیازمند توجه، نمودار پیشرفت، وضعیت قراردادها
+## وضعیت فعلی
+- Frontend روی GitHub Pages
+- ورود واقعی با Firebase Authentication (Email/Password)
+- کنترل دسترسی Admin از `users/{uid}` با `role=admin` و `active=true`
+- کتابخانه فعالیت‌ها روی Cloud Firestore و به‌صورت realtime
+- قراردادها هنوز موقتاً در LocalStorage هستند و در مرحله بعد به Firestore منتقل می‌شوند.
 
-## اجرا
-فایل `index.html` را در مرورگر باز کنید.
+## کتابخانه فعالیت‌ها در Firestore
+اپ در اولین ورود Admin، اگر کتابخانه هنوز Seed نشده باشد، کتابخانه پایه تاییدشده را خودکار ایجاد می‌کند.
 
-## ذخیره‌سازی فعلی
-این نسخه برای تست اولیه از `localStorage` مرورگر استفاده می‌کند. هنوز Backend / Firebase / احراز هویت به آن متصل نشده است.
+Collections:
+- `activityCategories`
+- `activityLibrary`
+- `appMeta` (marker مربوط به seed)
 
+مدیریت کتابخانه از داخل خود اپ انجام می‌شود:
+- افزودن/ویرایش/حذف دسته
+- افزودن/ویرایش/حذف فعالیت
+- جابه‌جایی فعالیت بین دسته‌ها از فرم ویرایش
+- ویرایش امتیاز حجم کار، هزینه و مدت
+- محاسبه خودکار ضریب پایه با فرمول 40% حجم + 35% هزینه + 25% مدت
 
-## Firebase Admin Login (v2)
-- Firebase Authentication: Email/Password
-- Session persistence: LOCAL
-- Admin authorization: Firestore `users/{uid}` must contain `role: "admin"` and `active: true`
-- Frontend host: GitHub Pages
-- Required Authorized Domain: `decor-shargh.github.io`
-- Current contracts/library data remain in browser LocalStorage in this version; Firestore data migration is the next step.
+حذف یا ویرایش یک فعالیت در کتابخانه، فعالیت Snapshot شده در قراردادهای قبلی را تغییر نمی‌دهد.
+
+## انتشار روی GitHub Pages
+برای ارتقا از V2 به V3 کافی است فایل `app.js` را در ریشه Repository جایگزین کنید. فایل‌های `index.html` و `styles.css` با این تغییر نیاز به جایگزینی ندارند.
+
+## V4 - PWA + Auth boot fix
+- Added installable PWA manifest and service worker.
+- Added install CTA for supported browsers and iOS Add to Home Screen guidance.
+- Added app icons (192, 512, Apple touch icon).
+- Removed login flash on refresh: a neutral boot splash remains visible until Firebase Auth state and admin access are resolved.
+- Firebase session remains LOCAL; signed-in users go straight back into the app after refresh.
