@@ -1,13 +1,13 @@
-const CACHE_NAME = 'decor-shargh-v4-20260927';
+const CACHE_NAME = 'decor-shargh-v5-20260927';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=4',
-  './app.js?v=4',
-  './manifest.webmanifest?v=4',
-  './icon-192.png?v=4',
-  './icon-512.png?v=4',
-  './apple-touch-icon.png?v=4'
+  './styles.css?v=5',
+  './app.js?v=5',
+  './manifest.webmanifest?v=5',
+  './icon-192.png?v=5',
+  './icon-512.png?v=5',
+  './apple-touch-icon.png?v=5'
 ];
 
 self.addEventListener('install', event => {

@@ -41,3 +41,15 @@
 .install-copy h3{font-size:16px;margin:0 0 5px}.install-copy p{font-size:12px;color:var(--muted);margin:0;line-height:1.8}
 .install-actions{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.install-actions button{width:100%}
 @media(max-width:520px){.boot-logo{width:66px;height:66px;border-radius:21px}.boot-name{font-size:20px}.install-card{border-radius:22px;padding:16px}.install-actions{grid-template-columns:1.25fr .75fr}}
+
+
+/* v5 contract form activities + Firestore contracts */
+.contract-form-activities{border:1px solid var(--line);border-radius:16px;padding:14px;background:#fbfcfd}
+.form-section-head{margin-bottom:10px}
+.form-section-head h3{font-size:15px;margin-bottom:4px}
+.contract-activity-add{margin-bottom:10px}
+.form-activity-list{display:grid;gap:8px}
+.form-activity-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.form-activity-item .compact{padding:7px 10px}
+.compact-empty{padding:14px}
+@media(max-width:520px){.contract-form-activities{padding:11px}.contract-activity-add{flex-direction:column}.contract-activity-add .suggestions{top:95px}.form-activity-item{grid-template-columns:minmax(0,1fr) auto}}

@@ -9,10 +9,10 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="دکوراسیون شرق" />
   <title>دکوراسیون شرق | پنل ادمین</title>
-  <link rel="manifest" href="manifest.webmanifest?v=4" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=4" />
-  <link rel="icon" href="icon-192.png?v=4" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="manifest" href="manifest.webmanifest?v=5" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=5" />
+  <link rel="icon" href="icon-192.png?v=5" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <section id="bootSplash" class="boot-splash" aria-live="polite">
@@ -179,6 +179,20 @@
         <label>تاریخ پایان قرارداد<input id="endDate" inputmode="numeric" required placeholder="۱۴۰۵/۰۸/۳۰" /></label>
         <label>تاریخ جبرانی<input id="compDate" inputmode="numeric" placeholder="اختیاری" /></label>
         <label class="full">توضیحات (اختیاری)<textarea id="contractNotes" rows="3"></textarea></label>
+        <section class="contract-form-activities full">
+          <div class="section-head form-section-head">
+            <div>
+              <h3>فعالیت‌های قرارداد</h3>
+              <div class="small muted">از کتابخانه جستجو کن و فعالیت‌های این قرارداد را قبل از ذخیره اضافه کن.</div>
+            </div>
+          </div>
+          <div class="activity-add contract-activity-add">
+            <input id="contractActivitySearch" type="text" placeholder="مثلاً سقف، کابینت، سرامیک..." autocomplete="off" />
+            <button id="addContractActivity" class="secondary" type="button" disabled>+ اضافه کردن</button>
+            <div id="contractActivitySuggestions" class="suggestions" style="display:none"></div>
+          </div>
+          <div id="contractFormActivityList" class="form-activity-list"></div>
+        </section>
         <div class="form-actions full">
           <button type="button" class="secondary" data-close-modal>انصراف</button>
           <button type="submit" class="primary">ذخیره قرارداد</button>
@@ -213,6 +227,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js?v=4"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

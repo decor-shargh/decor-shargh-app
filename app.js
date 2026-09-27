@@ -16,6 +16,10 @@ let libraryReady=false;
 let libraryCategoryDocs=[];
 let libraryActivityDocs=[];
 let libraryUnsubs=[];
+let contractsReady=false;
+let contractsUnsub=null;
+let contractFormActivities=[];
+let contractFormSelectedLibraryActivity=null;
 
 let authResolved=false;
 let deferredInstallPrompt=null;
@@ -159,6 +163,7 @@ async function initFirebaseAuth(){
         authResolved=true;
         currentAdmin=null;
         stopLibrarySync();
+        stopContractSync();
         showLogin();
         setAuthMessage('ایمیل و رمز عبور ادمین را وارد کنید.');
         return;
@@ -166,6 +171,7 @@ async function initFirebaseAuth(){
       try{
         await verifyAdmin(user);
         await initLibraryFirestore();
+        await initContractsFirestore();
         authResolved=true;
         showApp();
       }catch(err){
@@ -204,9 +210,9 @@ const initialLibrary=[
 function score(v,l,c){return +(v*.4+l*.35+c*.25).toFixed(2)}
 function uid(prefix='id'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8)}
 function freshState(){return {contracts:[],library:[]}}
-let state=load();
-function load(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return {contracts:Array.isArray(s?.contracts)?s.contracts:[],library:[]}}catch{return freshState()}}
-function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify({contracts:state.contracts}))}
+let state=freshState();
+function legacyLocalContracts(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return Array.isArray(s?.contracts)?s.contracts:[]}catch{return []}}
+function save(){/* Firestore is the source of truth. Kept as a no-op for legacy call safety. */}
 
 const LIB_CAT_COLLECTION='activityCategories';
 const LIB_ACT_COLLECTION='activityLibrary';
@@ -219,9 +225,9 @@ function stopLibrarySync(){
 }
 function firestoreErrorMessage(err){
   const code=err?.code||'';
-  if(code.includes('permission-denied'))return 'دسترسی به کتابخانه در Firestore مجاز نیست.';
+  if(code.includes('permission-denied'))return 'دسترسی به اطلاعات Firestore مجاز نیست.';
   if(code.includes('unavailable')||code.includes('network'))return 'ارتباط با Firestore برقرار نشد.';
-  return 'ذخیره‌سازی در Firestore انجام نشد.';
+  return 'عملیات Firestore انجام نشد.';
 }
 function rebuildLibraryFromRemote(){
   const cats=[...libraryCategoryDocs].filter(x=>x.active!==false).sort((a,b)=>(a.order??0)-(b.order??0)||String(a.name||'').localeCompare(String(b.name||''),'fa'));
@@ -317,6 +323,91 @@ async function updateActivityRemote(id,data){
 async function deleteActivityRemote(id){
   await db.collection(LIB_ACT_COLLECTION).doc(id).delete();
 }
+
+const CONTRACT_COLLECTION='contracts';
+const CONTRACT_META_DOC='appMeta/contractsMigration';
+
+function stopContractSync(){
+  if(contractsUnsub){try{contractsUnsub()}catch{}contractsUnsub=null}
+  contractsReady=false;
+}
+function contractDocPayload(c){
+  return {
+    customerName:String(c.customerName||'').trim(),
+    penCode:String(c.penCode||'').trim(),
+    amount:String(c.amount||''),
+    contractDate:String(c.contractDate||''),
+    endDate:String(c.endDate||''),
+    compDate:String(c.compDate||''),
+    notes:String(c.notes||''),
+    status:c.status||'active',
+    activities:Array.isArray(c.activities)?c.activities.map(a=>({
+      id:a.id||uid('ca'),
+      libraryId:a.libraryId||'',
+      categoryId:a.categoryId||'',
+      categoryName:a.categoryName||'',
+      name:String(a.name||''),
+      baseScore:Number(a.baseScore)||0,
+      progress:Math.max(0,Math.min(100,Number(a.progress)||0))
+    })):[],
+    statusReason:String(c.statusReason||''),
+    statusDate:String(c.statusDate||''),
+    completedAt:c.completedAt||null
+  };
+}
+async function migrateLegacyContractsIfNeeded(){
+  const metaRef=db.doc(CONTRACT_META_DOC);
+  const meta=await metaRef.get();
+  if(meta.exists)return;
+  const existing=await db.collection(CONTRACT_COLLECTION).limit(1).get();
+  const legacy=legacyLocalContracts();
+  let migratedCount=0;
+  if(existing.empty&&legacy.length){
+    let batch=db.batch(),ops=0;
+    for(const raw of legacy){
+      const ref=raw.id?db.collection(CONTRACT_COLLECTION).doc(String(raw.id)):db.collection(CONTRACT_COLLECTION).doc();
+      const payload=contractDocPayload({...raw,id:ref.id});
+      batch.set(ref,{...payload,createdAt:raw.createdAt||firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),migratedFromLocalStorage:true,createdBy:currentAdmin?.uid||''},{merge:true});
+      migratedCount++;ops++;
+      if(ops>=450){await batch.commit();batch=db.batch();ops=0}
+    }
+    if(ops)await batch.commit();
+  }
+  await metaRef.set({migrated:true,migratedCount,migratedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
+  if(migratedCount)toast(`${toFa(migratedCount)} قرارداد قبلی به Firestore منتقل شد`);
+}
+function startContractsSync(){
+  stopContractSync();
+  contractsUnsub=db.collection(CONTRACT_COLLECTION).onSnapshot(snap=>{
+    state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
+    contractsReady=true;
+    if(appStarted)renderAll();
+  },err=>toast(firestoreErrorMessage(err)));
+}
+async function initContractsFirestore(){
+  if(!db)return;
+  await migrateLegacyContractsIfNeeded();
+  const snap=await db.collection(CONTRACT_COLLECTION).get();
+  state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
+  contractsReady=true;
+  startContractsSync();
+}
+async function createContractRemote(data){
+  const ref=db.collection(CONTRACT_COLLECTION).doc();
+  const payload=contractDocPayload({...data,id:ref.id,status:'active'});
+  await ref.set({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:currentAdmin?.uid||''});
+  return ref.id;
+}
+async function updateContractRemote(id,patch){
+  const current=getContract(id)||{};
+  const merged={...current,...patch,id};
+  const payload=contractDocPayload(merged);
+  await db.collection(CONTRACT_COLLECTION).doc(id).set({...payload,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin?.uid||''},{merge:true});
+}
+async function persistContract(c){
+  syncAutoCompleted(c);
+  await updateContractRemote(c.id,c);
+}
 function toFa(v){return String(v).replace(/\d/g,d=>faDigits[d])}
 function toEn(v=''){return String(v).replace(/[۰-۹]/g,d=>faDigits.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d))}
 function money(v){const n=Number(toEn(v).replace(/,/g,''))||0;return toFa(n.toLocaleString('en-US'))+' تومان'}
@@ -361,10 +452,56 @@ function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDat
 
 function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>`<section class="category-card"><div class="category-head"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div>${cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty">فعالیتی در این دسته نیست.</div>'}</section>`).join('')}
 
-function renderAll(){state.contracts.forEach(syncAutoCompleted);save();renderHome();renderContracts();renderLibrary()}
+function renderAll(){renderHome();renderContracts();renderLibrary()}
 function switchView(name){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));if(name==='contracts')renderContracts();if(name==='library')renderLibrary();window.scrollTo({top:0,behavior:'smooth'})}
 
-function openContractForm(c=null){document.getElementById('contractForm').reset();document.getElementById('contractId').value=c?.id||'';document.getElementById('contractModalTitle').textContent=c?'ویرایش قرارداد':'قرارداد جدید';if(c){customerName.value=c.customerName;penCode.value=c.penCode;contractAmount.value=c.amount;contractDate.value=c.contractDate;endDate.value=c.endDate;compDate.value=c.compDate||'';contractNotes.value=c.notes||''}openModal('contractModal')}
+function openContractForm(c=null){
+  document.getElementById('contractForm').reset();
+  document.getElementById('contractId').value=c?.id||'';
+  document.getElementById('contractModalTitle').textContent=c?'ویرایش قرارداد':'قرارداد جدید';
+  contractFormActivities=(c?.activities||[]).map(a=>({...a}));
+  contractFormSelectedLibraryActivity=null;
+  if(c){customerName.value=c.customerName;penCode.value=c.penCode;contractAmount.value=c.amount;contractDate.value=c.contractDate;endDate.value=c.endDate;compDate.value=c.compDate||'';contractNotes.value=c.notes||''}
+  openModal('contractModal');
+  renderContractFormActivities();
+  wireContractFormActivityPicker();
+}
+function renderContractFormActivities(){
+  const root=document.getElementById('contractFormActivityList');
+  if(!root)return;
+  root.innerHTML=contractFormActivities.length?contractFormActivities.map(a=>`<div class="form-activity-item"><div><strong>${escapeHtml(a.name)}</strong><div class="small muted">${escapeHtml(a.categoryName||'سایر')} • ضریب ${toFa(a.baseScore||0)}${Number(a.progress)>0?` • پیشرفت ${toFa(a.progress)}٪`:''}</div></div><button type="button" class="danger compact" data-form-remove-activity="${a.id}">حذف</button></div>`).join(''):'<div class="empty compact-empty">هنوز فعالیتی انتخاب نشده است.</div>';
+  root.querySelectorAll('[data-form-remove-activity]').forEach(btn=>btn.onclick=()=>{
+    const a=contractFormActivities.find(x=>x.id===btn.dataset.formRemoveActivity);
+    if(!a)return;
+    if(Number(a.progress)>0&&!confirm(`فعالیت «${a.name}» دارای ${toFa(a.progress)}٪ پیشرفت است. از قرارداد حذف شود؟`))return;
+    contractFormActivities=contractFormActivities.filter(x=>x.id!==a.id);
+    renderContractFormActivities();
+    wireContractFormActivityPicker();
+  });
+}
+function wireContractFormActivityPicker(){
+  const search=document.getElementById('contractActivitySearch'),box=document.getElementById('contractActivitySuggestions'),add=document.getElementById('addContractActivity');
+  if(!search||!box||!add)return;
+  search.value='';box.style.display='none';add.disabled=true;contractFormSelectedLibraryActivity=null;
+  search.oninput=()=>{
+    contractFormSelectedLibraryActivity=null;add.disabled=true;
+    const q=search.value.trim();if(!q){box.style.display='none';return}
+    const used=new Set(contractFormActivities.map(a=>a.libraryId).filter(Boolean));
+    const results=flattenLibrary().filter(a=>!used.has(a.id)&&(a.name.includes(q)||a.categoryName.includes(q))).slice(0,14);
+    box.innerHTML=results.length?results.map(a=>`<div class="suggestion" data-form-suggest="${a.id}"><strong>${escapeHtml(a.name)}</strong><div class="small muted">${escapeHtml(a.categoryName)} • ضریب ${toFa(a.score)}</div></div>`).join(''):'<div class="suggestion muted">موردی پیدا نشد</div>';
+    box.style.display='block';
+    box.querySelectorAll('[data-form-suggest]').forEach(el=>el.onclick=()=>{
+      contractFormSelectedLibraryActivity=flattenLibrary().find(a=>a.id===el.dataset.formSuggest)||null;
+      if(!contractFormSelectedLibraryActivity)return;
+      search.value=contractFormSelectedLibraryActivity.name;box.style.display='none';add.disabled=false;
+    });
+  };
+  add.onclick=()=>{
+    const selected=contractFormSelectedLibraryActivity;if(!selected)return;
+    contractFormActivities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:0});
+    renderContractFormActivities();wireContractFormActivityPicker();toast('فعالیت به قرارداد اضافه شد');
+  };
+}
 function openModal(id){const m=document.getElementById(id);m.classList.add('open');m.setAttribute('aria-hidden','false')}
 function closeModal(id){const m=document.getElementById(id);m.classList.remove('open');m.setAttribute('aria-hidden','true')}
 
@@ -378,10 +515,10 @@ function openDetail(id){const c=getContract(id);if(!c)return;const p=contractPro
 ${c.notes?`<section class="panel" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
 openModal('detailModal');wireDetail(c)}
 function activityRow(c,a){const cat=state.library.find(x=>x.id===a.categoryId)?.name||a.categoryName||'سایر';const w=activityWeight(c,a);return `<div class="activity-row ${a.progress===100?'done':''}"><div class="activity-name"><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(cat)}</small></div><div class="act-weight"><small class="muted">وزن</small><br><strong>${toFa(w)}٪</strong></div><div class="act-cat"><small class="muted">ضریب</small><br>${toFa(a.baseScore)}</div><div class="progress-input"><input type="number" min="0" max="100" value="${a.progress}" data-progress="${a.id}"><span>٪</span></div><div class="activity-actions"><button title="تکمیل" class="quick-done" data-done="${a.id}">✓</button><button title="ویرایش" class="edit-act" data-edit-act="${a.id}">✎</button><button title="حذف" class="delete-act" data-del-act="${a.id}">🗑</button></div></div>`}
-function wireDetail(c){let selected=null;const search=document.getElementById('activitySearch'),box=document.getElementById('activitySuggestions'),add=document.getElementById('addSelectedActivity');search.addEventListener('input',()=>{selected=null;add.disabled=true;const q=search.value.trim();if(!q){box.style.display='none';return}const used=new Set((c.activities||[]).map(a=>a.libraryId));const results=flattenLibrary().filter(a=>!used.has(a.id)&&(a.name.includes(q)||a.categoryName.includes(q))).slice(0,12);box.innerHTML=results.length?results.map(a=>`<div class="suggestion" data-suggest="${a.id}"><strong>${escapeHtml(a.name)}</strong><div class="small muted">${escapeHtml(a.categoryName)} • ضریب ${toFa(a.score)}</div></div>`).join(''):'<div class="suggestion muted">موردی پیدا نشد</div>';box.style.display='block';box.querySelectorAll('[data-suggest]').forEach(el=>el.onclick=()=>{selected=flattenLibrary().find(a=>a.id===el.dataset.suggest);search.value=selected.name;box.style.display='none';add.disabled=false})});add.onclick=()=>{if(!selected)return;c.activities=c.activities||[];c.activities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:0});save();openDetail(c.id);toast('فعالیت اضافه شد')};document.querySelectorAll('[data-progress]').forEach(inp=>inp.onchange=()=>{const a=c.activities.find(x=>x.id===inp.dataset.progress);a.progress=Math.max(0,Math.min(100,Number(inp.value)||0));syncAutoCompleted(c);save();openDetail(c.id)});document.querySelectorAll('[data-done]').forEach(b=>b.onclick=()=>{c.activities.find(x=>x.id===b.dataset.done).progress=100;syncAutoCompleted(c);save();openDetail(c.id);toast('فعالیت ۱۰۰٪ شد')});document.querySelectorAll('[data-edit-act]').forEach(b=>b.onclick=()=>editContractActivity(c,b.dataset.editAct));document.querySelectorAll('[data-del-act]').forEach(b=>b.onclick=()=>deleteContractActivity(c,b.dataset.delAct));document.querySelector('[data-detail-edit]')?.addEventListener('click',()=>{closeModal('detailModal');openContractForm(c)});document.querySelector('[data-status-change]')?.addEventListener('click',()=>openStatusPrompt(c))}
-function editContractActivity(c,id){const a=c.activities.find(x=>x.id===id);showPrompt('ویرایش نام فعالیت',`<form id="editActForm"><label>نام فعالیت<input id="editActName" value="${escapeHtml(a.name)}" required></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('editActForm').onsubmit=e=>{e.preventDefault();a.name=document.getElementById('editActName').value.trim();save();closeModal('promptModal');openDetail(c.id)}}
-function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);const msg=a.progress>0?`این فعالیت دارای ${toFa(a.progress)}٪ پیشرفت ثبت‌شده است. مطمئن هستید؟`:'این فعالیت حذف شود؟';showPrompt('حذف فعالیت',`<div class="danger-note"><strong>${escapeHtml(a.name)}</strong><br>${msg}</div><div class="form-actions" style="margin-top:14px"><button class="secondary" data-close-prompt>لغو</button><button class="danger" id="confirmDeleteActivity">حذف فعالیت</button></div>`);document.getElementById('confirmDeleteActivity').onclick=()=>{c.activities=c.activities.filter(x=>x.id!==id);syncAutoCompleted(c);save();closeModal('promptModal');openDetail(c.id);toast('فعالیت حذف شد')}}
-function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=e=>{e.preventDefault();if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d)return toast('علت و تاریخ الزامی است');c.statusReason=r;c.statusDate=d}c.status=sel.value;save();closeModal('promptModal');openDetail(c.id);renderAll()}}
+function wireDetail(c){let selected=null;const search=document.getElementById('activitySearch'),box=document.getElementById('activitySuggestions'),add=document.getElementById('addSelectedActivity');search.addEventListener('input',()=>{selected=null;add.disabled=true;const q=search.value.trim();if(!q){box.style.display='none';return}const used=new Set((c.activities||[]).map(a=>a.libraryId));const results=flattenLibrary().filter(a=>!used.has(a.id)&&(a.name.includes(q)||a.categoryName.includes(q))).slice(0,12);box.innerHTML=results.length?results.map(a=>`<div class="suggestion" data-suggest="${a.id}"><strong>${escapeHtml(a.name)}</strong><div class="small muted">${escapeHtml(a.categoryName)} • ضریب ${toFa(a.score)}</div></div>`).join(''):'<div class="suggestion muted">موردی پیدا نشد</div>';box.style.display='block';box.querySelectorAll('[data-suggest]').forEach(el=>el.onclick=()=>{selected=flattenLibrary().find(a=>a.id===el.dataset.suggest);search.value=selected.name;box.style.display='none';add.disabled=false})});add.onclick=async()=>{if(!selected)return;add.disabled=true;c.activities=c.activities||[];c.activities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:0});try{await persistContract(c);openDetail(c.id);toast('فعالیت اضافه شد')}catch(err){toast(firestoreErrorMessage(err));add.disabled=false}};document.querySelectorAll('[data-progress]').forEach(inp=>inp.onchange=async()=>{const a=c.activities.find(x=>x.id===inp.dataset.progress);a.progress=Math.max(0,Math.min(100,Number(inp.value)||0));try{await persistContract(c);openDetail(c.id)}catch(err){toast(firestoreErrorMessage(err))}});document.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{b.disabled=true;c.activities.find(x=>x.id===b.dataset.done).progress=100;try{await persistContract(c);openDetail(c.id);toast('فعالیت ۱۰۰٪ شد')}catch(err){toast(firestoreErrorMessage(err));b.disabled=false}});document.querySelectorAll('[data-edit-act]').forEach(b=>b.onclick=()=>editContractActivity(c,b.dataset.editAct));document.querySelectorAll('[data-del-act]').forEach(b=>b.onclick=()=>deleteContractActivity(c,b.dataset.delAct));document.querySelector('[data-detail-edit]')?.addEventListener('click',()=>{closeModal('detailModal');openContractForm(c)});document.querySelector('[data-status-change]')?.addEventListener('click',()=>openStatusPrompt(c))}
+function editContractActivity(c,id){const a=c.activities.find(x=>x.id===id);showPrompt('ویرایش نام فعالیت',`<form id="editActForm"><label>نام فعالیت<input id="editActName" value="${escapeHtml(a.name)}" required></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('editActForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;a.name=document.getElementById('editActName').value.trim();try{await persistContract(c);closeModal('promptModal');openDetail(c.id)}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
+function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);const msg=a.progress>0?`این فعالیت دارای ${toFa(a.progress)}٪ پیشرفت ثبت‌شده است. مطمئن هستید؟`:'این فعالیت حذف شود؟';showPrompt('حذف فعالیت',`<div class="danger-note"><strong>${escapeHtml(a.name)}</strong><br>${msg}</div><div class="form-actions" style="margin-top:14px"><button class="secondary" data-close-prompt>لغو</button><button class="danger" id="confirmDeleteActivity">حذف فعالیت</button></div>`);document.getElementById('confirmDeleteActivity').onclick=async()=>{const btn=document.getElementById('confirmDeleteActivity');btn.disabled=true;c.activities=c.activities.filter(x=>x.id!==id);try{await persistContract(c);closeModal('promptModal');openDetail(c.id);toast('فعالیت حذف شد')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}}}
+function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d){if(btn)btn.disabled=false;return toast('علت و تاریخ الزامی است')}c.statusReason=r;c.statusDate=d}else{c.statusReason='';c.statusDate=''}c.status=sel.value;try{await updateContractRemote(c.id,c);closeModal('promptModal');openDetail(c.id);renderAll()}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
 function showPrompt(title,html){document.getElementById('promptTitle').textContent=title;document.getElementById('promptBody').innerHTML=html;openModal('promptModal');document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'))}
 
 function libraryPrompt(cat=null,act=null){
@@ -413,7 +550,7 @@ function libraryPrompt(cat=null,act=null){
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>openContractForm();
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
-document.getElementById('contractForm').onsubmit=e=>{e.preventDefault();const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim()};if(!data.contractDate||!data.endDate)return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید');const id=contractId.value;if(id){Object.assign(getContract(id),data);toast('قرارداد ویرایش شد')}else state.contracts.push({id:uid('c'),...data,status:'active',activities:[],createdAt:new Date().toISOString()});save();closeModal('contractModal');renderAll();switchView('contracts')};
+document.getElementById('contractForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim(),activities:contractFormActivities.map(a=>({...a}))};if(!data.contractDate||!data.endDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}try{const id=contractId.value;if(id){await updateContractRemote(id,data);toast('قرارداد در Firestore ویرایش شد')}else{await createContractRemote(data);toast('قرارداد در Firestore ثبت شد')}closeModal('contractModal');switchView('contracts')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}};
 ['filterCustomer','filterFrom','filterTo','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterFrom.value='';filterTo.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
