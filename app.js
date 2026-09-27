@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="14.0.0";
+const APP_VERSION="15.0.0";
 
 let auth=null;
 let db=null;
@@ -165,16 +165,27 @@ function roleFa(role){
 function currentRole(){return currentUserProfile?.role||'';}
 function isAdminRole(){return currentRole()==='admin'&&currentUserProfile?.active===true;}
 function isSiteSupervisor(){return currentRole()==='siteSupervisor'&&currentUserProfile?.active===true;}
+function uiRole(){return uiPreviewRole||currentRole();}
+function isSupervisorUi(){return uiRole()==='siteSupervisor';}
+function isAdminUi(){return uiRole()==='admin';}
+function profileSignature(p={}){return [p.role||'',p.active===true?'1':'0',p.blocked===true?'1':'0'].join('|');}
 function configureRoleUi(){
   const shell=document.getElementById('appShell');
   if(!shell)return;
-  shell.classList.toggle('role-supervisor',isSiteSupervisor());
-  shell.classList.toggle('role-admin',isAdminRole());
+  shell.classList.toggle('role-supervisor',isSupervisorUi());
+  shell.classList.toggle('role-admin',!isSupervisorUi());
   const badge=document.getElementById('panelBadge');
-  if(badge)badge.textContent=isSiteSupervisor()?'Site Supervisor':'Admin Panel';
-  document.title=isSiteSupervisor()?'Decor Shargh | Site Supervisor':'Decor Shargh | Admin Panel';
-  if(isSiteSupervisor())switchView('home');
+  if(badge)badge.textContent=isSupervisorUi()?'Site Supervisor':'Admin Panel';
+  document.title=isSupervisorUi()?'Decor Shargh | Site Supervisor':'Decor Shargh | Admin Panel';
+  const banner=document.getElementById('previewRoleBanner');
+  if(banner){
+    banner.classList.toggle('is-hidden',!uiPreviewRole);
+    const txt=banner.querySelector('[data-preview-label]');
+    if(txt)txt.textContent=uiPreviewRole==='siteSupervisor'?'پیش‌نمایش پنل سرپرست اجرا':'پیش‌نمایش پنل ادمین';
+  }
+  if(isSupervisorUi()&&['library','more'].includes(document.querySelector('.view.active')?.dataset?.view||''))switchView('home');
 }
+
 function showRoleGate(profile,user){addSystemLog('نمایش پنل نقشِ آماده‌نشده',user?.email||profile?.email||'');
   hideAllAuthScreens();
   const role=profile?.role||'';
@@ -185,14 +196,15 @@ function showRoleGate(profile,user){addSystemLog('نمایش پنل نقشِ آ�
   document.getElementById('roleGate')?.classList.remove('is-hidden');
   hideBootSplash();
 }
-function showApp(){addSystemLog(isSiteSupervisor()?'ورود به پنل سرپرست اجرا':'ورود به پنل ادمین',currentAdmin?.email||currentUserProfile?.email||'');
+function showApp(){
   hideAllAuthScreens();
   configureRoleUi();
   document.getElementById('appShell')?.classList.remove('is-hidden');
   hideBootSplash();
-  if(!appStarted){appStarted=true;renderAll();}
-  else renderAll();
+  renderAll();
+  appStarted=true;
 }
+
 function authErrorMessage(err){
   const code=err?.code||'';
   if(code.includes('invalid-credential')||code.includes('wrong-password')||code.includes('user-not-found'))return 'ایمیل یا رمز عبور صحیح نیست.';
@@ -320,42 +332,84 @@ async function applyPendingRemember(role,user){
   const intent=pendingRememberIntent;pendingRememberIntent=null;
   await applyRememberPreference(intent.email||user?.email||'',intent.pass||'',intent.remember===true,role);
 }
+
+function timestampMs(v){
+  try{if(!v)return 0;if(typeof v.toMillis==='function')return v.toMillis();if(typeof v.toDate==='function')return v.toDate().getTime();const d=new Date(v);return Number.isFinite(d.getTime())?d.getTime():0}catch{return 0}
+}
+function presenceDateTime(v){
+  const ms=timestampMs(v);if(!ms)return 'ثبت نشده';
+  try{return new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(ms))}catch{return 'ثبت نشده'}
+}
+function stopPresenceTracking(){
+  if(presenceHeartbeatTimer){clearInterval(presenceHeartbeatTimer);presenceHeartbeatTimer=null}
+}
+function queuePresenceWrite(state='online'){
+  if(!db||!currentAdmin?.uid||currentUserProfile?.active!==true)return;
+  const payload={
+    lastActiveAt:firebase.firestore.FieldValue.serverTimestamp(),
+    presenceState:state,
+    presenceUpdatedAt:firebase.firestore.FieldValue.serverTimestamp()
+  };
+  if(state!=='online')payload.lastSeenAt=firebase.firestore.FieldValue.serverTimestamp();
+  db.collection('users').doc(currentAdmin.uid).set(payload,{merge:true}).catch(()=>{});
+}
+function startPresenceTracking(){
+  stopPresenceTracking();
+  queuePresenceWrite('online');
+  presenceHeartbeatTimer=setInterval(()=>{if(document.visibilityState==='visible')queuePresenceWrite('online')},PRESENCE_HEARTBEAT_MS);
+}
+function isUserOnline(u){
+  if(u?.active!==true||u?.blocked===true||u?.presenceState==='away')return false;
+  return Date.now()-timestampMs(u?.lastActiveAt)<=PRESENCE_ONLINE_MS;
+}
+document.addEventListener('visibilitychange',()=>{
+  if(!currentAdmin?.uid||currentUserProfile?.active!==true)return;
+  if(document.visibilityState==='visible')queuePresenceWrite('online');else queuePresenceWrite('away');
+});
 async function routeUserByProfile(user,profile){
   currentUserProfile={uid:user.uid,email:user.email||profile?.email||'',...(profile||{})};
   const role=profile?.role||'pending',active=profile?.active===true;
   await applyPendingRemember(role,user);
   if(role==='admin'&&active){
-    currentAdmin=currentUserProfile;
-    await initLibraryFirestore();
-    await initContractsFirestore();
-    showApp();return;
+    currentAdmin=currentUserProfile;startPresenceTracking();showApp();
+    if(!libraryUnsubs.length)initLibraryFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    if(!contractsUnsub)initContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    return;
   }
   if(role==='siteSupervisor'&&active){
-    currentAdmin=currentUserProfile;
-    stopLibrarySync();
-    state.library=[];
-    await initContractsFirestore();
-    showApp();return;
+    currentAdmin=currentUserProfile;startPresenceTracking();stopLibrarySync();state.library=[];showApp();
+    if(!contractsUnsub)initContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    return;
   }
-  currentAdmin=null;stopLibrarySync();stopContractSync();
+  stopPresenceTracking();currentAdmin=null;stopLibrarySync();stopContractSync();
   if(role==='blocked'||profile?.blocked===true){showBlocked();return;}
   if(role==='pending'||!active){showPending(profile,user);return;}
   if(role==='projectManager'){showRoleGate(profile,user);return;}
   showPending(profile,user);
 }
+
 async function watchOwnProfile(user){
   stopProfileSync();
   const ref=db.collection('users').doc(user.uid);
   profileUnsub=ref.onSnapshot(async snap=>{
     try{
       if(!snap.exists){
-        const created=await ensureOwnProfile(user);
+        const created=await ensureOwnProfile(user);profileAccessSignature='';
         await routeUserByProfile(user,created.data()||{});return;
       }
-      await routeUserByProfile(user,snap.data()||{});
+      const data=snap.data()||{};
+      const sig=profileSignature(data);
+      if(currentUserProfile?.uid===user.uid&&profileAccessSignature===sig){
+        currentUserProfile={...currentUserProfile,...data,uid:user.uid,email:user.email||data.email||currentUserProfile.email||''};
+        if(currentAdmin?.uid===user.uid)currentAdmin=currentUserProfile;
+        return;
+      }
+      profileAccessSignature=sig;
+      await routeUserByProfile(user,data);
     }catch(err){showLogin(authErrorMessage(err));}
   },err=>showLogin(authErrorMessage(err)));
 }
+
 async function initFirebaseAuth(){
   if(typeof firebase==='undefined'){
     authResolved=true;showLogin('کتابخانه Firebase بارگذاری نشد. دسترسی شبکه به Firebase را بررسی کنید.');return;
@@ -363,12 +417,13 @@ async function initFirebaseAuth(){
   try{
     if(!firebase.apps.length)firebase.initializeApp(firebaseConfig);
     auth=firebase.auth();db=firebase.firestore();
+    try{await db.enablePersistence({synchronizeTabs:true})}catch(err){if(!['failed-precondition','unimplemented'].some(x=>String(err?.code||'').includes(x)))console.warn('Firestore persistence',err)}
     try{await auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)}catch{}
     await hydrateRememberedLogin();
     auth.onAuthStateChanged(async user=>{
       authResolved=true;
       if(!user){
-        currentAdmin=null;currentUserProfile=null;stopProfileSync();stopLibrarySync();stopContractSync();showLogin();
+        stopPresenceTracking();profileAccessSignature='';currentAdmin=null;currentUserProfile=null;stopProfileSync();stopLibrarySync();stopContractSync();showLogin();
         setAuthMessage('ایمیل و رمز عبور را وارد کنید.');return;
       }
       try{await ensureOwnProfile(user);await watchOwnProfile(user);}
@@ -376,6 +431,7 @@ async function initFirebaseAuth(){
     },err=>{authResolved=true;showLogin(authErrorMessage(err));});
   }catch(err){authResolved=true;showLogin(authErrorMessage(err));}
 }
+
 
 
 const THEME_STORAGE_KEY='decorSharghTheme';
@@ -406,12 +462,33 @@ function freshState(){return {contracts:[],library:[]}}
 let state=freshState();
 let libraryExpandedCats=new Set();
 let systemLogs=[];
+let uiPreviewRole='';
+let historyCache=new Map();
+let historyUnsub=null;
+let issuesCache=new Map();
+let issuesUnsub=null;
+let usersAdminUnsub=null;
+let usersPresenceTimer=null;
+let presenceHeartbeatTimer=null;
+let profileAccessSignature='';
+let auditLogUnsub=null;
+let auditLogCache=[];
+const AUDIT_COLLECTION='auditLogs';
+const PRESENCE_ONLINE_MS=120000;
+const PRESENCE_HEARTBEAT_MS=55000;
+let contractRenderFrame=0;
+function scheduleContractViewsRender(){
+  if(contractRenderFrame)return;
+  contractRenderFrame=requestAnimationFrame(()=>{
+    contractRenderFrame=0;
+    renderHome();
+    renderContracts();
+  });
+}
 function legacyLocalContracts(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return Array.isArray(s?.contracts)?s.contracts:[]}catch{return []}}
 function save(){/* Firestore is the source of truth. Kept as a no-op for legacy call safety. */}
-function addSystemLog(action,detail=''){
-  systemLogs.unshift({time:new Date().toISOString(),action:String(action||''),detail:String(detail||'')});
-  systemLogs=systemLogs.slice(0,50);
-}
+function addSystemLog(action,detail=''){/* V15: لاگ قابل مشاهده فقط تغییرات واقعی و دائمی Firestore است. */}
+
 function systemLogTime(iso){
   try{return new Intl.DateTimeFormat('fa-IR',{hour:'2-digit',minute:'2-digit',second:'2-digit',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(iso));}
   catch{return iso||'';}
@@ -607,19 +684,49 @@ function startContractsSync(){
   contractsUnsub=db.collection(CONTRACT_COLLECTION).onSnapshot(snap=>{
     state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
     contractsReady=true;
-    if(appStarted)renderAll();
+    if(appStarted)scheduleContractViewsRender();
   },err=>toast(firestoreErrorMessage(err)));
 }
 async function initContractsFirestore(){
-  if(!db)return;
-  if(isAdminRole())await migrateLegacyContractsIfNeeded();
-  const snap=await db.collection(CONTRACT_COLLECTION).get();
-  state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
-  contractsReady=true;
-  startContractsSync();
-  // Runtime diagnostic writes remain Admin-only; supervisors only read/update permitted contract progress.
-  if(isAdminRole())db.doc('appMeta/runtime').set({appVersion:APP_VERSION,lastSeenAt:firebase.firestore.FieldValue.serverTimestamp(),lastSeenBy:currentAdmin?.uid||''},{merge:true}).catch(()=>{});
+  if(!db||contractsUnsub)return;
+  contractsReady=false;
+  contractsUnsub=db.collection(CONTRACT_COLLECTION).onSnapshot({includeMetadataChanges:true},snap=>{
+    state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
+    contractsReady=true;
+    if(appStarted)scheduleContractViewsRender();
+  },err=>toast(firestoreErrorMessage(err)));
+  if(isAdminRole()){
+    migrateLegacyContractsIfNeeded().catch(()=>{});
+    db.doc('appMeta/runtime').set({appVersion:APP_VERSION,lastSeenAt:firebase.firestore.FieldValue.serverTimestamp(),lastSeenBy:currentAdmin?.uid||''},{merge:true}).catch(()=>{});
+  }
 }
+
+function contractChangeSummary(before={},after={}){
+  const defs=[
+    ['customerName','نام مشتری',v=>String(v||'')],
+    ['penCode','کد قلم',v=>String(v||'')],
+    ['amount','مبلغ',v=>money(v)],
+    ['contractDate','تاریخ قرارداد',v=>String(v||'—')],
+    ['endDate','سررسید',v=>String(v||'—')],
+    ['compDate','سررسید جبرانی',v=>String(v||'—')],
+    ['notes','توضیحات',v=>String(v||'—')]
+  ];
+  const parts=[];
+  defs.forEach(([key,label,fmt])=>{
+    const a=String(before?.[key]??''),b=String(after?.[key]??'');
+    if(a!==b)parts.push(`${label}: «${fmt(before?.[key])}» ← «${fmt(after?.[key])}»`);
+  });
+  return parts;
+}
+function auditContractCreated(contract){
+  writeAuditLog('ایجاد قرارداد',`قرارداد «${contract.customerName||''}» با کد قلم «${contract.penCode||''}» ایجاد شد.`,{contractId:contract.id||'',contractName:contract.customerName||'',penCode:contract.penCode||'',kind:'contractCreate'});
+}
+function auditContractEdited(before,after){
+  const changes=contractChangeSummary(before,after);
+  if(!changes.length)return;
+  writeAuditLog('ویرایش قرارداد',changes.join(' | '),{contractId:after.id||before.id||'',contractName:after.customerName||before.customerName||'',penCode:after.penCode||before.penCode||'',kind:'contractEdit'});
+}
+
 async function createContractRemote(data){
   if(!db||!currentAdmin||!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
   const ref=db.collection(CONTRACT_COLLECTION).doc();
@@ -650,57 +757,54 @@ async function persistContract(c){
   syncAutoCompleted(c);
   await updateContractRemote(c.id,c);
 }
+
+function actorAuditFields(){return {actorUid:currentAdmin?.uid||'',actorName:currentAdmin?.name||'',actorEmail:currentAdmin?.email||'',actorRole:currentRole()}}
+function makeAuditData(title,detail='',extra={}){
+  return {title:String(title||''),detail:String(detail||''),...extra,...actorAuditFields(),createdAt:firebase.firestore.FieldValue.serverTimestamp(),createdAtClient:new Date().toISOString(),appVersion:APP_VERSION};
+}
+function writeAuditLog(title,detail='',extra={}){
+  if(!db||!currentAdmin?.uid)return;
+  db.collection(AUDIT_COLLECTION).add(makeAuditData(title,detail,extra)).catch(()=>{});
+}
+function addAuditToBatch(batch,title,detail='',extra={}){
+  const ref=db.collection(AUDIT_COLLECTION).doc();batch.set(ref,makeAuditData(title,detail,extra));return ref;
+}
+function refreshProgressUi(c,activityId){
+  const a=(c.activities||[]).find(x=>x.id===activityId);if(!a)return;
+  const progress=effectiveActivityProgress(c,a),done=progress===100;
+  const row=document.querySelector(`[data-activity-row="${CSS.escape(activityId)}"]`);
+  if(row){row.classList.toggle('done',done);const txt=row.querySelector('.supervisor-activity-title span');if(txt)txt.textContent=`پیشرفت فعلی: ${toFa(progress)}٪`;const title=row.querySelector('.supervisor-activity-title strong,.activity-title-text');if(title)title.classList.toggle('done',done);const input=row.querySelector('input[type="number"]');if(input)input.value=progress;const doneBtn=row.querySelector('[data-supervisor-done],[data-done]');if(doneBtn){doneBtn.disabled=done;doneBtn.classList.toggle('is-done',done)}}
+  const total=document.querySelector('.detail-total-progress');if(total)total.textContent=`${toFa(contractProgress(c))}٪`;
+  scheduleContractViewsRender();
+}
 async function updateActivityProgressRemote(c,activityId,newProgress,action='manual'){
   if(!db||!currentAdmin||!(isAdminRole()||isSiteSupervisor()))throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
-  const ref=db.collection(CONTRACT_COLLECTION).doc(c.id);
-  const historyRef=ref.collection('history').doc();
+  const activity=(c.activities||[]).find(a=>a.id===activityId);if(!activity)throw new Error('activity-not-found');
   const nextProgress=Math.max(0,Math.min(100,Number(newProgress)||0));
-  const result=await db.runTransaction(async tx=>{
-    const snap=await tx.get(ref);
-    if(!snap.exists)throw new Error('contract-not-found');
-    const remote={id:snap.id,...snap.data()};
-    const activity=(remote.activities||[]).find(a=>a.id===activityId);
-    if(!activity)throw new Error('activity-not-found');
-    const oldProgress=effectiveActivityProgress(remote,activity);
-    if(oldProgress===nextProgress)return {changed:false,oldProgress,activityName:activity.name||''};
-    const nextMap={...(remote.progressByActivity||{}),[activityId]:nextProgress};
-    const nextContract={...remote,progressByActivity:nextMap};
-    if(isAdminRole())nextContract.activities=(remote.activities||[]).map(a=>a.id===activityId?{...a,progress:nextProgress}:{...a});
-    syncAutoCompleted(nextContract);
-    const patch={
-      progressByActivity:nextMap,
-      status:nextContract.status||'active',
-      completedAt:nextContract.completedAt||null,
-      updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
-      updatedBy:currentAdmin.uid||'',
-      appVersion:APP_VERSION
-    };
-    if(isAdminRole())patch.activities=nextContract.activities;
-    tx.set(ref,patch,{merge:true});
-    tx.set(historyRef,{
-      contractId:c.id,
-      activityId:activity.id,
-      activityName:String(activity.name||''),
-      oldProgress,
-      newProgress:nextProgress,
-      action:action==='done'?'done':'manual',
-      changedByUid:currentAdmin.uid||'',
-      changedByEmail:currentAdmin.email||'',
-      changedByName:currentAdmin.name||'',
-      changedByRole:currentRole(),
-      changedAt:firebase.firestore.FieldValue.serverTimestamp(),
-      appVersion:APP_VERSION
-    });
-    return {changed:true,oldProgress,activityName:activity.name||''};
+  const oldProgress=effectiveActivityProgress(c,activity);
+  if(oldProgress===nextProgress)return {saved:c,changed:false};
+  const previousMap={...(c.progressByActivity||{})};const previousStatus=c.status;const previousCompleted=c.completedAt;
+  c.progressByActivity={...previousMap,[activityId]:nextProgress};syncAutoCompleted(c);
+  refreshProgressUi(c,activityId);
+  const ref=db.collection(CONTRACT_COLLECTION).doc(c.id),historyRef=ref.collection('history').doc();
+  const batch=db.batch();
+  const patch={
+    [`progressByActivity.${activityId}`]:nextProgress,
+    status:c.status||'active',completedAt:c.completedAt||null,
+    updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION
+  };
+  batch.update(ref,patch);
+  batch.set(historyRef,{contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION});
+  addAuditToBatch(batch,action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,kind:action==='done'?'activityDone':'progress'});
+  const pending=batch.commit();
+  pending.catch(err=>{
+    if(String(err?.code||'').includes('permission-denied')){
+      c.progressByActivity=previousMap;c.status=previousStatus;c.completedAt=previousCompleted;refreshProgressUi(c,activityId);toast('ذخیره مجاز نشد؛ مقدار قبلی برگردانده شد.');
+    }
   });
-  if(!result.changed)return {saved:c,changed:false};
-  const check=await ref.get();
-  if(!check.exists)throw Object.assign(new Error('firestore-update-not-confirmed'),{code:'unavailable'});
-  const saved={id:check.id,...check.data()};
-  const i=state.contracts.findIndex(x=>x.id===c.id);
-  if(i>=0)state.contracts[i]=saved;else state.contracts.push(saved);
-  return {saved,changed:true};
+  return {saved:c,changed:true,pending:true};
 }
+
 function toFa(v){return String(v).replace(/\d/g,d=>faDigits[d])}
 function toEn(v=''){return String(v).replace(/[۰-۹]/g,d=>faDigits.indexOf(d)).replace(/[٠-٩]/g,d=>'٠١٢٣٤٥٦٧٨٩'.indexOf(d))}
 function money(v){const n=Number(toEn(v).replace(/,/g,''))||0;return toFa(n.toLocaleString('en-US'))+' ریال'}
@@ -766,20 +870,31 @@ function toast(msg){const el=document.getElementById('toast');el.textContent=msg
 
 function getContract(id){return state.contracts.find(c=>c.id===id)}
 function activeContracts(){return state.contracts.filter(c=>c.status==='active')}
+
+function contractIssueBadge(c){
+  const count=Math.max(0,Number(c?.openIssueCount)||0),latest=c?.latestOpenIssue;
+  if(!count||!latest?.text)return '';
+  return `<div class="contract-issue-preview"><span class="issue-count-badge">${toFa(count)} مورد باز</span><span class="issue-latest-text">${escapeHtml(latest.text)}</span></div>`;
+}
 function adminContractCard(c){const p=contractProgress(c),ds=dueState(c);const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ${toFa(effectiveActivityProgress(c,a))}٪</span>`).join('')||'<span class="muted small">هنوز فعالیتی تعریف نشده</span>';return `<article class="contract-card ${statusClass(c)}" data-open-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div><div class="code">کد قلم: ${escapeHtml(c.penCode)}</div></div><div class="amount">${money(c.amount)}</div></div>
 <div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge">${escapeHtml(statusLabels[c.status]||'')}</span></div>
+${contractIssueBadge(c)}
 <div class="progress-row"><span class="small">پیشرفت</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="activities-mini">${acts}</div>
 <div class="card-actions"><button class="secondary" data-action="view" data-id="${c.id}">مشاهده قرارداد</button><button class="secondary" data-action="edit" data-id="${c.id}">ویرایش</button></div>
 </article>`}
+
 function supervisorContractCard(c){const p=contractProgress(c),ds=dueState(c);return `<article class="contract-card supervisor-contract-card ${statusClass(c)}" data-open-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div><div class="code">کد قلم: ${escapeHtml(c.penCode)}</div></div><div class="supervisor-card-status">${escapeHtml(statusLabels[c.status]||'')}</div></div>
 <div class="supervisor-contract-due badge ${ds.key}">${escapeHtml(ds.text)}</div>
+${contractIssueBadge(c)}
 <div class="progress-row supervisor-progress-row"><span class="small">پیشرفت کل</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="supervisor-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>${money(c.amount)}</span></div>
 </article>`}
-function contractCard(c){return isSiteSupervisor()?supervisorContractCard(c):adminContractCard(c)}
+
+function contractCard(c){return isSupervisorUi()?supervisorContractCard(c):adminContractCard(c)}
+
 
 function renderHome(){const active=activeContracts();const near=active.filter(c=>dueState(c).key==='near');const critical=active.filter(c=>['critical','overdue'].includes(dueState(c).key));const avg=active.length?+(active.reduce((s,c)=>s+contractProgress(c),0)/active.length).toFixed(1):0;document.getElementById('kpiGrid').innerHTML=[
  ['فعال',active.length,'blue','active'],['نزدیک سررسید',near.length,'orange','near'],['بحرانی',critical.length,'red','critical'],['میانگین پیشرفت',`${avg}٪`,'','progress']
@@ -796,7 +911,14 @@ function renderContracts(){let arr=[...state.contracts].sort((a,b)=>(jalaliToDat
 function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>{const expanded=libraryExpandedCats.has(cat.id);const body=cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty compact-empty">فعالیتی در این دسته نیست.</div>';return `<section class="category-card ${expanded?'open':''}"><div class="category-head"><button class="category-toggle" type="button" data-lib-toggle="${cat.id}" aria-expanded="${expanded?'true':'false'}"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><span class="category-chevron">${expanded?'▾':'▸'}</span></button><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div><div class="category-body ${expanded?'':'is-hidden'}">${body}</div></section>`}).join('')}
 
 function renderAll(){renderHome();renderContracts();renderLibrary()}
-function switchView(name){document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));if(name==='contracts')renderContracts();if(name==='library')renderLibrary();addSystemLog('تغییر بخش',name);window.scrollTo({top:0,behavior:'smooth'})}
+function switchView(name){
+  if(isSupervisorUi()&&['library','more'].includes(name))name='home';
+  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));
+  if(name==='contracts')renderContracts();if(name==='library')renderLibrary();
+  window.scrollTo({top:0,behavior:'auto'});
+}
+
 
 function openContractForm(c=null){
   if(!isAdminRole())return;
@@ -847,7 +969,8 @@ function wireContractFormActivityPicker(){
   };
 }
 function openModal(id){const m=document.getElementById(id);m.classList.add('open');m.setAttribute('aria-hidden','false')}
-function closeModal(id){const m=document.getElementById(id);m.classList.remove('open');m.setAttribute('aria-hidden','true')}
+function closeModal(id){const m=document.getElementById(id);if(!m)return;m.classList.remove('open');m.setAttribute('aria-hidden','true');if(id==='detailModal'){stopHistoryListener();stopIssuesListener()}if(id==='systemLogModal'){if(auditLogUnsub){try{auditLogUnsub()}catch{}auditLogUnsub=null}}}
+
 
 function flattenLibrary(){return state.library.flatMap(cat=>cat.items.map(a=>({...a,categoryId:cat.id,categoryName:cat.name})))}
 function detailDueHtml(c,ds){
@@ -875,27 +998,120 @@ function historyDateTime(value){
   }catch{return '—';}
 }
 function historyRoleLabel(role){return role==='siteSupervisor'?'سرپرست اجرا':role==='admin'?'ادمین':roleFa(role)}
-function historyEntriesHtml(items){
+function historyEntriesHtml(items,contractId=''){
   if(!items.length)return '<div class="empty compact-empty">هنوز تغییری برای درصد فعالیت‌های این قرارداد ثبت نشده است.</div>';
   return items.map(item=>`<div class="contract-history-entry">
     <div class="history-entry-main"><strong>${escapeHtml(item.activityName||'فعالیت')}</strong><div class="history-progress-change"><span>${toFa(item.oldProgress??0)}٪</span><b>←</b><span>${toFa(item.newProgress??0)}٪</span>${item.action==='done'?'<em>انجام شد</em>':''}</div></div>
-    <div class="history-entry-meta"><span>${escapeHtml(item.changedByName||item.changedByEmail||'کاربر')}</span><span>${escapeHtml(historyRoleLabel(item.changedByRole||''))}</span><time>${escapeHtml(historyDateTime(item.changedAt))}</time></div>
+    <div class="history-entry-meta"><span>${escapeHtml(item.changedByName||item.changedByEmail||'کاربر')}</span><span>${escapeHtml(historyRoleLabel(item.changedByRole||''))}</span><time>${escapeHtml(historyDateTime(item.changedAt||item.changedAtClient))}</time>${isAdminRole()&&!isSupervisorUi()?`<button type="button" class="history-delete-one" data-history-delete="${item.id}" data-history-contract="${contractId}">حذف</button>`:''}</div>
   </div>`).join('');
 }
+
+
+function sortHistoryItems(items){return [...items].sort((a,b)=>(timestampMs(b.changedAt)||timestampMs(b.changedAtClient))-(timestampMs(a.changedAt)||timestampMs(a.changedAtClient)))}
+function renderHistoryPanel(contractId){
+  const panel=document.getElementById('contractHistoryPanel');if(!panel||panel.dataset.historyContract!==contractId)return;
+  const items=sortHistoryItems(historyCache.get(contractId)||[]);
+  panel.innerHTML=`<div class="contract-history-head"><strong>تاریخچه بروزرسانی فعالیت‌ها</strong><div class="history-head-actions"><span>${toFa(items.length)} مورد</span>${isAdminRole()&&!isSupervisorUi()&&items.length?`<button type="button" class="history-clear-all" data-history-clear="${contractId}">پاک کردن تاریخچه</button>`:''}</div></div>${historyEntriesHtml(items,contractId)}`;
+  panel.querySelectorAll('[data-history-delete]').forEach(b=>b.onclick=()=>deleteHistoryEntry(contractId,b.dataset.historyDelete));
+  panel.querySelector('[data-history-clear]')?.addEventListener('click',()=>clearContractHistory(contractId));
+}
+function stopHistoryListener(){if(historyUnsub){try{historyUnsub()}catch{}historyUnsub=null}}
+async function deleteHistoryEntry(contractId,historyId){
+  if(!isAdminRole()||!confirm('این رکورد از تاریخچه قرارداد حذف شود؟'))return;
+  const ref=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('history').doc(historyId);
+  const item=(historyCache.get(contractId)||[]).find(x=>x.id===historyId);
+  try{await ref.delete();writeAuditLog('حذف رکورد تاریخچه',item?`رکورد فعالیت «${item.activityName||'فعالیت'}» از تاریخچه قرارداد حذف شد.`:'یک رکورد از تاریخچه قرارداد حذف شد.',{contractId,kind:'historyDelete'});toast('رکورد تاریخچه حذف شد')}catch(err){toast(firestoreErrorMessage(err))}
+}
+async function clearContractHistory(contractId){
+  if(!isAdminRole()||!confirm('کل تاریخچه این قرارداد پاک شود؟ این عمل قابل بازگشت نیست.'))return;
+  try{
+    const snap=await db.collection(CONTRACT_COLLECTION).doc(contractId).collection('history').get();
+    const docs=snap.docs;
+    for(let i=0;i<docs.length;i+=400){const batch=db.batch();docs.slice(i,i+400).forEach(d=>batch.delete(d.ref));await batch.commit()}
+    const c=getContract(contractId);writeAuditLog('پاک کردن تاریخچه قرارداد',`تاریخچه قرارداد «${c?.customerName||''}» پاک شد.`,{contractId,contractName:c?.customerName||'',penCode:c?.penCode||'',kind:'historyClear'});toast('تاریخچه قرارداد پاک شد');
+  }catch(err){toast(firestoreErrorMessage(err))}
+}
+function prewarmContractHistory(contractId){
+  if(!db||!contractId||historyCache.has(contractId))return;
+  const q=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('history');
+  q.get({source:'cache'}).then(snap=>{
+    if(!snap.empty&&!historyCache.has(contractId))historyCache.set(contractId,snap.docs.map(d=>({id:d.id,...d.data()})));
+  }).catch(()=>{});
+  q.get().then(snap=>{
+    historyCache.set(contractId,snap.docs.map(d=>({id:d.id,...d.data()})));
+    const panel=document.getElementById('contractHistoryPanel');
+    if(panel&&!panel.classList.contains('is-hidden')&&panel.dataset.historyContract===contractId)renderHistoryPanel(contractId);
+  }).catch(()=>{});
+}
+
 async function toggleContractHistory(contractId,button){
   const panel=document.getElementById('contractHistoryPanel');if(!panel)return;
   const isOpen=!panel.classList.contains('is-hidden');
-  if(isOpen){panel.classList.add('is-hidden');if(button)button.textContent='تاریخچه تغییرات';return;}
+  if(isOpen){panel.classList.add('is-hidden');if(button)button.textContent='تاریخچه تغییرات';stopHistoryListener();return;}
   panel.classList.remove('is-hidden');if(button)button.textContent='بستن تاریخچه';
-  if(panel.dataset.loaded==='1')return;
-  panel.innerHTML='<div class="history-loading">در حال دریافت تاریخچه...</div>';
-  try{
-    const snap=await db.collection(CONTRACT_COLLECTION).doc(contractId).collection('history').orderBy('changedAt','desc').limit(50).get();
-    const items=snap.docs.map(d=>({id:d.id,...d.data()}));
-    panel.innerHTML=`<div class="contract-history-head"><strong>تاریخچه بروزرسانی فعالیت‌ها</strong><span>${toFa(items.length)} مورد</span></div>${historyEntriesHtml(items)}`;
-    panel.dataset.loaded='1';
-  }catch(err){panel.innerHTML=`<div class="empty compact-empty">${escapeHtml(firestoreErrorMessage(err))}</div>`;}
+  if(historyCache.has(contractId))renderHistoryPanel(contractId);else panel.innerHTML='<div class="history-loading">در حال دریافت تاریخچه...</div>';
+  stopHistoryListener();
+  historyUnsub=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('history').onSnapshot({includeMetadataChanges:true},snap=>{
+    const items=snap.docs.map(d=>({id:d.id,...d.data()}));historyCache.set(contractId,items);renderHistoryPanel(contractId);
+  },err=>{if(!historyCache.has(contractId))panel.innerHTML=`<div class="empty compact-empty">${escapeHtml(firestoreErrorMessage(err))}</div>`});
 }
+
+
+function issueOwnerCanManage(issue){return (isAdminRole()&&!isSupervisorUi())||issue?.createdByUid===currentAdmin?.uid}
+function issueSortMs(i){return timestampMs(i?.updatedAt)||timestampMs(i?.createdAt)||timestampMs(i?.updatedAtClient)||timestampMs(i?.createdAtClient)}
+function issueSummary(items){
+  const open=[...(items||[])].filter(x=>x.status!=='done').sort((a,b)=>issueSortMs(b)-issueSortMs(a));
+  return {openIssueCount:open.length,latestOpenIssue:open[0]?{id:open[0].id,text:String(open[0].text||''),createdByName:String(open[0].createdByName||open[0].createdByEmail||''),atClient:open[0].updatedAtClient||open[0].createdAtClient||''}:null};
+}
+function issueListHtml(contractId){
+  const items=[...(issuesCache.get(contractId)||[])].sort((a,b)=>(a.status==='done')-(b.status==='done')||issueSortMs(b)-issueSortMs(a));
+  if(!items.length)return '<div class="empty compact-empty">هنوز مورد یا مشکلی ثبت نشده است.</div>';
+  return items.map(i=>`<div class="contract-issue-row ${i.status==='done'?'done':''}" data-issue-id="${i.id}"><div class="issue-row-main"><div class="issue-row-title"><span class="issue-status ${i.status==='done'?'done':'open'}">${i.status==='done'?'انجام شد':'باز'}</span><strong>${escapeHtml(i.text||'')}</strong></div><div class="issue-row-meta">${escapeHtml(i.createdByName||i.createdByEmail||'کاربر')} • ${escapeHtml(historyDateTime(i.updatedAt||i.createdAt||i.updatedAtClient||i.createdAtClient))}</div></div>${issueOwnerCanManage(i)?`<div class="issue-row-actions"><button type="button" class="secondary" data-issue-edit="${i.id}">ویرایش</button>${i.status!=='done'?`<button type="button" class="secondary" data-issue-done="${i.id}">انجام شد</button>`:''}<button type="button" class="danger" data-issue-delete="${i.id}">حذف</button></div>`:''}</div>`).join('');
+}
+function issuesSectionHtml(contractId){return `<section class="panel contract-issues-panel" style="box-shadow:none"><div class="section-head"><div><h3>موارد و مشکلات</h3><span class="muted small">موارد اجرایی این قرارداد</span></div></div><div class="issue-compose"><textarea id="newIssueText" rows="2" placeholder="مورد یا مشکل را بنویسید..."></textarea><button type="button" class="primary" id="addIssueBtn">ثبت مورد</button></div><div id="contractIssuesList" class="contract-issues-list"><div class="history-loading">در حال دریافت موارد...</div></div></section>`}
+function renderIssuesPanel(contractId){const box=document.getElementById('contractIssuesList');if(!box)return;box.innerHTML=issueListHtml(contractId);wireIssueActions(contractId)}
+function stopIssuesListener(){if(issuesUnsub){try{issuesUnsub()}catch{}issuesUnsub=null}}
+function startIssuesRealtime(contractId){
+  stopIssuesListener();if(issuesCache.has(contractId))renderIssuesPanel(contractId);
+  issuesUnsub=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('issues').onSnapshot({includeMetadataChanges:true},snap=>{
+    const items=snap.docs.map(d=>({id:d.id,...d.data()}));issuesCache.set(contractId,items);renderIssuesPanel(contractId);
+    const summary=issueSummary(items),c=getContract(contractId);if(c){c.openIssueCount=summary.openIssueCount;c.latestOpenIssue=summary.latestOpenIssue;renderContracts()}
+  },err=>{const box=document.getElementById('contractIssuesList');if(box&&!issuesCache.has(contractId))box.innerHTML=`<div class="empty compact-empty">${escapeHtml(firestoreErrorMessage(err))}</div>`});
+}
+function applyIssueSummaryLocal(contractId,items){
+  issuesCache.set(contractId,items);const summary=issueSummary(items),c=getContract(contractId);if(c){c.openIssueCount=summary.openIssueCount;c.latestOpenIssue=summary.latestOpenIssue;renderContracts()}renderIssuesPanel(contractId);return summary;
+}
+function writeIssueMutation(contractId,nextItems,issueWrite,auditTitle,auditDetail,auditExtra={}){
+  const summary=applyIssueSummaryLocal(contractId,nextItems);const batch=db.batch();issueWrite(batch);
+  batch.set(db.collection(CONTRACT_COLLECTION).doc(contractId),{openIssueCount:summary.openIssueCount,latestOpenIssue:summary.latestOpenIssue,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin?.uid||'',appVersion:APP_VERSION},{merge:true});
+  const c=getContract(contractId);addAuditToBatch(batch,auditTitle,auditDetail,{contractId,contractName:c?.customerName||'',penCode:c?.penCode||'',...auditExtra});
+  batch.commit().catch(err=>{if(String(err?.code||'').includes('permission-denied'))toast('ذخیره مورد مجاز نشد.')});
+}
+function addContractIssue(contractId,text){
+  text=String(text||'').trim();if(!text)return toast('متن مورد یا مشکل را وارد کنید.');
+  const ref=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('issues').doc();const now=new Date().toISOString();
+  const item={id:ref.id,contractId,text,status:'open',createdByUid:currentAdmin?.uid||'',createdByName:currentAdmin?.name||'',createdByEmail:currentAdmin?.email||'',createdByRole:currentRole(),createdAtClient:now,updatedAtClient:now};
+  const next=[item,...(issuesCache.get(contractId)||[])];
+  writeIssueMutation(contractId,next,batch=>batch.set(ref,{...item,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()}),'ثبت مشکل',`مورد «${text}» ثبت شد.`,{kind:'issueCreate',issueId:ref.id});
+  const input=document.getElementById('newIssueText');if(input)input.value='';toast('مورد ثبت شد');
+}
+function editContractIssue(contractId,issueId){
+  const issue=(issuesCache.get(contractId)||[]).find(x=>x.id===issueId);if(!issue||!issueOwnerCanManage(issue))return;
+  showPrompt('ویرایش مورد',`<form id="editIssueForm"><label>شرح مورد<textarea id="editIssueText" rows="3" required>${escapeHtml(issue.text||'')}</textarea></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);
+  document.getElementById('editIssueForm').onsubmit=e=>{e.preventDefault();const text=document.getElementById('editIssueText').value.trim();if(!text)return;const old=issue.text;const now=new Date().toISOString();const next=(issuesCache.get(contractId)||[]).map(x=>x.id===issueId?{...x,text,updatedAtClient:now}:x);const ref=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('issues').doc(issueId);writeIssueMutation(contractId,next,b=>b.set(ref,{text,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAtClient:now},{merge:true}),'ویرایش مشکل',`مورد «${old}» به «${text}» ویرایش شد.`,{kind:'issueEdit',issueId});closeModal('promptModal');toast('مورد ویرایش شد')};
+}
+function completeContractIssue(contractId,issueId){
+  const issue=(issuesCache.get(contractId)||[]).find(x=>x.id===issueId);if(!issue||!issueOwnerCanManage(issue))return;const now=new Date().toISOString();const next=(issuesCache.get(contractId)||[]).map(x=>x.id===issueId?{...x,status:'done',updatedAtClient:now}:x);const ref=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('issues').doc(issueId);writeIssueMutation(contractId,next,b=>b.set(ref,{status:'done',completedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAtClient:now},{merge:true}),'بستن مشکل',`مورد «${issue.text||''}» انجام شد.`,{kind:'issueDone',issueId});toast('مورد انجام شد');
+}
+function deleteContractIssue(contractId,issueId){
+  const issue=(issuesCache.get(contractId)||[]).find(x=>x.id===issueId);if(!issue||!issueOwnerCanManage(issue)||!confirm('این مورد حذف شود؟'))return;const next=(issuesCache.get(contractId)||[]).filter(x=>x.id!==issueId);const ref=db.collection(CONTRACT_COLLECTION).doc(contractId).collection('issues').doc(issueId);writeIssueMutation(contractId,next,b=>b.delete(ref),'حذف مشکل',`مورد «${issue.text||''}» حذف شد.`,{kind:'issueDelete',issueId});toast('مورد حذف شد');
+}
+function wireIssueActions(contractId){
+  document.querySelectorAll('[data-issue-edit]').forEach(b=>b.onclick=()=>editContractIssue(contractId,b.dataset.issueEdit));
+  document.querySelectorAll('[data-issue-done]').forEach(b=>b.onclick=()=>completeContractIssue(contractId,b.dataset.issueDone));
+  document.querySelectorAll('[data-issue-delete]').forEach(b=>b.onclick=()=>deleteContractIssue(contractId,b.dataset.issueDelete));
+}
+function wireIssueComposer(contractId){const btn=document.getElementById('addIssueBtn');if(btn)btn.onclick=()=>addContractIssue(contractId,document.getElementById('newIssueText')?.value||'');startIssuesRealtime(contractId)}
 function supervisorActivityRow(c,a){
   const progress=effectiveActivityProgress(c,a),done=progress===100;
   return `<div class="supervisor-activity-row ${done?'done':''}" data-activity-row="${a.id}">
@@ -907,68 +1123,45 @@ function supervisorActivityRow(c,a){
   </div>`;
 }
 function openSupervisorDetail(id){
-  const c=getContract(id);if(!c)return;
+  const c=getContract(id);if(!c)return;stopHistoryListener();stopIssuesListener();prewarmContractHistory(id);
   const p=contractProgress(c),ds=dueState(c);
   document.getElementById('detailTitle').textContent=c.customerName;
   document.getElementById('detailSubtitle').textContent=`کد قلم ${c.penCode} • ${statusLabels[c.status]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-  <div class="detail-summary-v2 supervisor-summary">
-    <div class="detail-summary-main">
-      <div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${money(c.amount)}</strong></div>
-      <div class="summary-box compact-summary"><span>پیشرفت کل</span><strong>${toFa(p)}٪</strong></div>
-      <div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div>
-    </div>
-    <div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div>
-  </div>
+  <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${money(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
   <div class="supervisor-detail-tools"><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
   <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
-  <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">برای بروزرسانی، درصد را وارد و «ثبت» را بزنید</span></div>
-  <div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی برای این قرارداد تعریف نشده است.</div>'}</div></section>
+  <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">درصد را وارد و «ثبت» را بزنید</span></div><div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی برای این قرارداد تعریف نشده است.</div>'}</div></section>
+  ${issuesSectionHtml(c.id)}
   ${c.notes?`<section class="panel supervisor-notes" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
-  openModal('detailModal');wireSupervisorDetail(c);
+  openModal('detailModal');wireSupervisorDetail(c);wireIssueComposer(c.id);
 }
+
 function wireSupervisorDetail(c){
-  document.querySelectorAll('[data-supervisor-progress]').forEach(inp=>{
-    const selectAll=()=>window.setTimeout(()=>{try{inp.select()}catch{}},0);
-    inp.addEventListener('focus',selectAll);inp.addEventListener('click',()=>{if(document.activeElement===inp)selectAll()});
-    inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector(`[data-supervisor-save="${inp.dataset.supervisorProgress}"]`)?.click();}});
-  });
-  document.querySelectorAll('[data-supervisor-save]').forEach(btn=>btn.onclick=async()=>{
-    const id=btn.dataset.supervisorSave,inp=document.querySelector(`[data-supervisor-progress="${id}"]`),a=(c.activities||[]).find(x=>x.id===id);if(!inp||!a)return;
-    const value=Math.max(0,Math.min(100,Number(inp.value)||0));inp.value=value;btn.disabled=true;
-    try{const result=await updateActivityProgressRemote(c,id,value,'manual');openDetail(c.id);toast(result.changed?'درصد پیشرفت ثبت شد':'درصد تغییری نکرده است')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}
-  });
-  document.querySelectorAll('[data-supervisor-done]').forEach(btn=>btn.onclick=async()=>{
-    const id=btn.dataset.supervisorDone;if(!(c.activities||[]).some(a=>a.id===id))return;btn.disabled=true;
-    try{await updateActivityProgressRemote(c,id,100,'done');openDetail(c.id);toast('فعالیت انجام شد')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}
-  });
+  document.querySelectorAll('[data-supervisor-progress]').forEach(inp=>{const selectAll=()=>window.setTimeout(()=>{try{inp.select()}catch{}},0);inp.addEventListener('focus',selectAll);inp.addEventListener('click',()=>{if(document.activeElement===inp)selectAll()});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector(`[data-supervisor-save="${inp.dataset.supervisorProgress}"]`)?.click()}})});
+  document.querySelectorAll('[data-supervisor-save]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorSave,inp=document.querySelector(`[data-supervisor-progress="${id}"]`),a=(c.activities||[]).find(x=>x.id===id);if(!inp||!a)return;const value=Math.max(0,Math.min(100,Number(inp.value)||0));inp.value=value;const result=await updateActivityProgressRemote(c,id,value,'manual');if(result.changed){toast(navigator.onLine?'درصد ثبت شد':'درصد ذخیره شد؛ پس از اتصال همگام می‌شود')}else toast('درصد تغییری نکرده است')});
+  document.querySelectorAll('[data-supervisor-done]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorDone;if(!(c.activities||[]).some(a=>a.id===id))return;const result=await updateActivityProgressRemote(c,id,100,'done');if(result.changed){toast(navigator.onLine?'فعالیت انجام شد':'انجام شد؛ پس از اتصال همگام می‌شود')}});
   document.querySelector('[data-toggle-history]')?.addEventListener('click',e=>toggleContractHistory(c.id,e.currentTarget));
 }
-function openDetail(id){if(isSiteSupervisor())return openSupervisorDetail(id);return openAdminDetail(id)}
+
+function openDetail(id){if(isSupervisorUi())return openSupervisorDetail(id);return openAdminDetail(id)}
+
 function openAdminDetail(id){
-  const c=getContract(id);if(!c)return;
+  const c=getContract(id);if(!c)return;stopHistoryListener();stopIssuesListener();prewarmContractHistory(id);
   const p=contractProgress(c),ds=dueState(c);
-  document.getElementById('detailTitle').textContent=c.customerName;
-  document.getElementById('detailSubtitle').textContent=`کد قلم ${c.penCode} • ${statusLabels[c.status]}`;
+  document.getElementById('detailTitle').textContent=c.customerName;document.getElementById('detailSubtitle').textContent=`کد قلم ${c.penCode} • ${statusLabels[c.status]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-<div class="detail-summary-v2">
-  <div class="detail-summary-main">
-    <div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${money(c.amount)}</strong></div>
-    <div class="summary-box compact-summary"><span>پیشرفت کل</span><strong>${toFa(p)}٪</strong></div>
-    <div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div>
-  </div>
-  <div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div>
-</div>
+<div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${money(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
 <div class="detail-toolbar"><button class="secondary" data-detail-edit="${c.id}">ویرایش اطلاعات قرارداد</button><button class="secondary" data-status-change="${c.id}">تغییر وضعیت</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
 <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
-<section class="panel detail-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">جمع وزن‌ها: ۱۰۰٪</span></div>
-<div class="activity-add"><input id="activitySearch" placeholder="جستجو در کتابخانه؛ مثلاً سقف" autocomplete="off"><button class="primary" id="addSelectedActivity" disabled>+ اضافه کردن</button><div id="activitySuggestions" class="suggestions" style="display:none"></div></div>
-<div class="activity-table" id="activityRows">${sorted.length?sorted.map(a=>activityRow(c,a)).join(''):'<div class="empty">هنوز فعالیتی برای این قرارداد تعریف نشده.</div>'}</div></section>
+<section class="panel detail-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">جمع وزن‌ها: ۱۰۰٪</span></div><div class="activity-add"><input id="activitySearch" placeholder="جستجو در کتابخانه؛ مثلاً سقف" autocomplete="off"><button class="primary" id="addSelectedActivity" disabled>+ اضافه کردن</button><div id="activitySuggestions" class="suggestions" style="display:none"></div></div><div class="activity-table" id="activityRows">${sorted.length?sorted.map(a=>activityRow(c,a)).join(''):'<div class="empty">هنوز فعالیتی برای این قرارداد تعریف نشده.</div>'}</div></section>
+${issuesSectionHtml(c.id)}
 ${c.notes?`<section class="panel" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
-  openModal('detailModal');wireDetail(c);
+  openModal('detailModal');wireDetail(c);wireIssueComposer(c.id);
 }
+
 function activityRow(c,a){
   const cat=state.library.find(x=>x.id===a.categoryId)?.name||a.categoryName||'سایر';
   const w=activityWeight(c,a);
@@ -1011,7 +1204,7 @@ function wireDetail(c){
     if(!selected)return;add.disabled=true;
     c.activities=c.activities||[];
     c.activities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:0});
-    try{await persistContract(c);openDetail(c.id);toast('فعالیت اضافه شد')}catch(err){toast(firestoreErrorMessage(err));add.disabled=false}
+    try{await persistContract(c);writeAuditLog('افزودن فعالیت',`فعالیت «${selected.name}» به قرارداد اضافه شد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityName:selected.name,kind:'activityCreate'});openDetail(c.id);toast('فعالیت اضافه شد')}catch(err){toast(firestoreErrorMessage(err));add.disabled=false}
   };
   document.querySelectorAll('[data-progress]').forEach(inp=>{
     const selectAll=()=>window.setTimeout(()=>{try{inp.select()}catch{}},0);
@@ -1025,12 +1218,12 @@ function wireDetail(c){
     const a=c.activities.find(x=>x.id===id);if(!a||!inp)return;
     const value=Math.max(0,Math.min(100,Number(inp.value)||0));
     inp.value=value;b.disabled=true;
-    try{const result=await updateActivityProgressRemote(c,id,value,'manual');openDetail(c.id);toast(result.changed?'درصد پیشرفت ثبت شد':'درصد تغییری نکرده است')}catch(err){toast(firestoreErrorMessage(err));b.disabled=false}
+    try{const result=await updateActivityProgressRemote(c,id,value,'manual');b.disabled=false;if(result.changed){toast(navigator.onLine?'درصد ثبت شد':'درصد ذخیره شد؛ پس از اتصال همگام می‌شود')}else toast('درصد تغییری نکرده است')}catch(err){toast(firestoreErrorMessage(err));b.disabled=false}
   });
   document.querySelectorAll('[data-done]').forEach(b=>b.onclick=async()=>{
     b.disabled=true;
     const a=c.activities.find(x=>x.id===b.dataset.done);if(!a)return;
-    try{await updateActivityProgressRemote(c,a.id,100,'done');openDetail(c.id);toast('فعالیت انجام شد')}catch(err){toast(firestoreErrorMessage(err));b.disabled=false}
+    try{await updateActivityProgressRemote(c,a.id,100,'done');toast(navigator.onLine?'فعالیت انجام شد':'انجام شد؛ پس از اتصال همگام می‌شود')}catch(err){toast(firestoreErrorMessage(err));b.disabled=false}
   });
   document.querySelectorAll('[data-edit-act]').forEach(b=>b.onclick=()=>editContractActivity(c,b.dataset.editAct));
   document.querySelectorAll('[data-del-act]').forEach(b=>b.onclick=()=>deleteContractActivity(c,b.dataset.delAct));
@@ -1038,9 +1231,9 @@ function wireDetail(c){
   document.querySelector('[data-status-change]')?.addEventListener('click',()=>openStatusPrompt(c));
   document.querySelector('[data-toggle-history]')?.addEventListener('click',e=>toggleContractHistory(c.id,e.currentTarget));
 }
-function editContractActivity(c,id){const a=c.activities.find(x=>x.id===id);showPrompt('ویرایش نام فعالیت',`<form id="editActForm"><label>نام فعالیت<input id="editActName" value="${escapeHtml(a.name)}" required></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('editActForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;a.name=document.getElementById('editActName').value.trim();try{await persistContract(c);closeModal('promptModal');openDetail(c.id)}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
-function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);const currentProgress=effectiveActivityProgress(c,a);const msg=currentProgress>0?`این فعالیت دارای ${toFa(currentProgress)}٪ پیشرفت ثبت‌شده است. مطمئن هستید؟`:'این فعالیت حذف شود؟';showPrompt('حذف فعالیت',`<div class="danger-note"><strong>${escapeHtml(a.name)}</strong><br>${msg}</div><div class="form-actions" style="margin-top:14px"><button class="secondary" data-close-prompt>لغو</button><button class="danger" id="confirmDeleteActivity">حذف فعالیت</button></div>`);document.getElementById('confirmDeleteActivity').onclick=async()=>{const btn=document.getElementById('confirmDeleteActivity');btn.disabled=true;c.activities=c.activities.filter(x=>x.id!==id);if(c.progressByActivity)delete c.progressByActivity[id];try{await persistContract(c);closeModal('promptModal');openDetail(c.id);toast('فعالیت حذف شد')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}}}
-function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d){if(btn)btn.disabled=false;return toast('علت و تاریخ الزامی است')}c.statusReason=r;c.statusDate=d}else{c.statusReason='';c.statusDate=''}c.status=sel.value;try{await updateContractRemote(c.id,c);closeModal('promptModal');openDetail(c.id);renderAll()}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
+function editContractActivity(c,id){const a=c.activities.find(x=>x.id===id);showPrompt('ویرایش نام فعالیت',`<form id="editActForm"><label>نام فعالیت<input id="editActName" value="${escapeHtml(a.name)}" required></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('editActForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;a.name=document.getElementById('editActName').value.trim();try{await persistContract(c);writeAuditLog('ویرایش فعالیت قرارداد',`نام فعالیت قرارداد به «${a.name}» تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityName:a.name,kind:'activityEdit'});closeModal('promptModal');openDetail(c.id)}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
+function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);const currentProgress=effectiveActivityProgress(c,a);const msg=currentProgress>0?`این فعالیت دارای ${toFa(currentProgress)}٪ پیشرفت ثبت‌شده است. مطمئن هستید؟`:'این فعالیت حذف شود؟';showPrompt('حذف فعالیت',`<div class="danger-note"><strong>${escapeHtml(a.name)}</strong><br>${msg}</div><div class="form-actions" style="margin-top:14px"><button class="secondary" data-close-prompt>لغو</button><button class="danger" id="confirmDeleteActivity">حذف فعالیت</button></div>`);document.getElementById('confirmDeleteActivity').onclick=async()=>{const btn=document.getElementById('confirmDeleteActivity');btn.disabled=true;c.activities=c.activities.filter(x=>x.id!==id);if(c.progressByActivity)delete c.progressByActivity[id];try{await persistContract(c);writeAuditLog('حذف فعالیت',`فعالیت «${a.name||''}» از قرارداد حذف شد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityName:a.name||'',kind:'activityDelete'});closeModal('promptModal');openDetail(c.id);toast('فعالیت حذف شد')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}}}
+function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d){if(btn)btn.disabled=false;return toast('علت و تاریخ الزامی است')}c.statusReason=r;c.statusDate=d}else{c.statusReason='';c.statusDate=''}c.status=sel.value;try{await updateContractRemote(c.id,c);writeAuditLog('تغییر وضعیت قرارداد',`وضعیت قرارداد «${c.customerName||''}» به «${statusLabels[c.status]||c.status}» تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',kind:'contractStatus'});closeModal('promptModal');openDetail(c.id);renderAll()}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
 function showPrompt(title,html){document.getElementById('promptTitle').textContent=title;document.getElementById('promptBody').innerHTML=html;openModal('promptModal');document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'))}
 
 function libraryPrompt(cat=null,act=null){
@@ -1076,28 +1269,15 @@ function userState(u){
   return 'active';
 }
 function groupUsersByEmail(rows){
-  const groups=new Map();
-  rows.forEach(u=>{
-    if(u.hidden===true)return;
-    const key=normalizeUserEmail(u.email)||('__uid__'+u.id);
-    if(!groups.has(key))groups.set(key,[]);
-    groups.get(key).push(u);
-  });
+  const groups=new Map();rows.forEach(u=>{if(u.hidden===true)return;const key=normalizeUserEmail(u.email)||('__uid__'+u.id);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(u)});
   return [...groups.values()].map(group=>{
-    // یک ایمیل فقط یک بار نمایش داده می‌شود. اولویت با سند UID فعلی، سپس حساب فعال، مسدود و pending است.
-    const self=group.find(x=>x.id===currentAdmin?.uid);
-    const active=group.find(x=>userState(x)==='active');
-    const blocked=group.find(x=>userState(x)==='blocked');
-    const pending=group.find(x=>userState(x)==='pending');
-    const base=self||active||blocked||pending||group[0];
-    const chosenState=active?'active':blocked?'blocked':'pending';
-    const source=chosenState==='active'?active:(chosenState==='blocked'?blocked:pending)||base;
-    return {...base,...source,id:base.id,email:source?.email||base.email||'',_docIds:group.map(x=>x.id),_duplicateCount:group.length,_state:chosenState};
-  }).sort((a,b)=>{
-    const ap=a._state==='pending'?0:a._state==='active'?1:2,bp=b._state==='pending'?0:b._state==='active'?1:2;
-    return ap-bp||normalizeUserEmail(a.email).localeCompare(normalizeUserEmail(b.email));
-  });
+    const self=group.find(x=>x.id===currentAdmin?.uid),active=group.find(x=>userState(x)==='active'),blocked=group.find(x=>userState(x)==='blocked'),pending=group.find(x=>userState(x)==='pending');
+    const base=self||active||blocked||pending||group[0],chosenState=active?'active':blocked?'blocked':'pending',source=chosenState==='active'?active:(chosenState==='blocked'?blocked:pending)||base;
+    const newestActive=[...group].sort((a,b)=>timestampMs(b.lastActiveAt)-timestampMs(a.lastActiveAt))[0];const newestSeen=[...group].sort((a,b)=>timestampMs(b.lastSeenAt)-timestampMs(a.lastSeenAt))[0];
+    return {...base,...source,id:base.id,email:source?.email||base.email||'',lastActiveAt:newestActive?.lastActiveAt||source?.lastActiveAt,lastSeenAt:newestSeen?.lastSeenAt||source?.lastSeenAt,_docIds:group.map(x=>x.id),_duplicateCount:group.length,_state:chosenState};
+  }).sort((a,b)=>{const ap=isUserOnline(a)?0:a._state==='pending'?1:a._state==='active'?2:3,bp=isUserOnline(b)?0:b._state==='pending'?1:b._state==='active'?2:3;return ap-bp||normalizeUserEmail(a.email).localeCompare(normalizeUserEmail(b.email))});
 }
+
 async function updateUserGroup(u,payload){
   const ids=(u?._docIds?.length?u._docIds:[u?.id]).filter(Boolean);
   if(!ids.length)return;
@@ -1105,52 +1285,38 @@ async function updateUserGroup(u,payload){
   ids.forEach(id=>batch.set(db.collection('users').doc(id),payload,{merge:true}));
   await batch.commit();
 }
-async function openUsersAdmin(){addSystemLog('باز کردن کاربران و دسترسی‌ها','');
-  if(!db||!currentAdmin||!isAdminRole())return;
-  openModal('usersModal');
-  const box=document.getElementById('usersAdminList');
-  if(box)box.innerHTML='<div class="empty">در حال دریافت کاربران...</div>';
-  try{
-    const snap=await db.collection('users').get();
-    usersAdminRawCache=snap.docs.map(d=>({id:d.id,...d.data()}));
-    usersAdminCache=groupUsersByEmail(usersAdminRawCache);
-    renderUsersAdmin();
-  }catch(err){if(box)box.innerHTML=`<div class="empty">${escapeHtml(authErrorMessage(err))}</div>`;}
+
+function stopUsersAdminRealtime(){if(usersAdminUnsub){try{usersAdminUnsub()}catch{}usersAdminUnsub=null}if(usersPresenceTimer){clearInterval(usersPresenceTimer);usersPresenceTimer=null}}
+function closeUsersAdmin(){stopUsersAdminRealtime();closeModal('usersModal')}
+function userPresenceHtml(u){if(isUserOnline(u))return '<span class="user-presence online"><i></i> آنلاین</span>';const v=u.lastSeenAt||u.lastActiveAt;return `<span class="user-presence offline">آخرین بازدید: ${escapeHtml(presenceDateTime(v))}</span>`}
+async function openUsersAdmin(){
+  if(!db||!currentAdmin||!isAdminRole())return;openModal('usersModal');const box=document.getElementById('usersAdminList');if(box)box.innerHTML='<div class="empty">در حال دریافت کاربران...</div>';stopUsersAdminRealtime();
+  usersAdminUnsub=db.collection('users').onSnapshot({includeMetadataChanges:true},snap=>{usersAdminRawCache=snap.docs.map(d=>({id:d.id,...d.data()}));usersAdminCache=groupUsersByEmail(usersAdminRawCache);renderUsersAdmin()},err=>{if(box)box.innerHTML=`<div class="empty">${escapeHtml(authErrorMessage(err))}</div>`});
+  usersPresenceTimer=setInterval(renderUsersAdmin,30000);
 }
+
 function renderUsersAdmin(){
-  const box=document.getElementById('usersAdminList');if(!box)return;
-  if(!usersAdminCache.length){box.innerHTML='<div class="empty">هنوز کاربری ثبت نشده است.</div>';return;}
+  const box=document.getElementById('usersAdminList');if(!box)return;if(!usersAdminCache.length){box.innerHTML='<div class="empty">هنوز کاربری ثبت نشده است.</div>';return;}
   box.innerHTML=usersAdminCache.map(u=>{
-    const self=(u._docIds||[u.id]).includes(currentAdmin?.uid);
-    const state=u._state||userState(u);
-    const stateLabel=state==='blocked'?'مسدود':state==='pending'?'در انتظار تأیید':'فعال';
-    const actions=[];
-    if(!self){
-      actions.push(`<button class="secondary" type="button" data-user-approve="${u.id}">${state==='pending'?'تأیید و تعیین نقش':'ویرایش نقش'}</button>`);
-      if(state==='blocked'){
-        actions.push(`<button class="secondary" type="button" data-user-enable="${u.id}">فعال‌سازی</button>`);
-        actions.push(`<button class="danger" type="button" data-user-delete="${u.id}">حذف</button>`);
-      }else{
-        actions.push(`<button class="danger" type="button" data-user-block="${u.id}">مسدود</button>`);
-      }
-    }
-    actions.push(`<button class="text-btn" type="button" data-user-reset="${u.id}">بازیابی رمز</button>`);
-    return `<div class="user-access-row"><div class="user-access-main"><div class="user-access-email">${escapeHtml(u.email||'')}</div><div class="user-access-meta"><span class="user-role-pill">${escapeHtml(roleFa(u.role))}${self?' · شما':''}</span><span class="user-state-pill ${state}">${stateLabel}</span>${u.name?`<span class="user-role-pill">${escapeHtml(u.name)}</span>`:''}</div></div><div class="user-access-actions">${actions.join('')}</div></div>`;
+    const self=(u._docIds||[u.id]).includes(currentAdmin?.uid),state=u._state||userState(u),stateLabel=state==='blocked'?'مسدود':state==='pending'?'در انتظار تأیید':'فعال';const actions=[];
+    if(!self){actions.push(`<button class="secondary" type="button" data-user-approve="${u.id}">${state==='pending'?'تأیید و تعیین نقش':'ویرایش نقش'}</button>`);if(state==='blocked'){actions.push(`<button class="secondary" type="button" data-user-enable="${u.id}">فعال‌سازی</button>`);actions.push(`<button class="danger" type="button" data-user-delete="${u.id}">حذف</button>`)}else actions.push(`<button class="danger" type="button" data-user-block="${u.id}">مسدود</button>`)}actions.push(`<button class="text-btn" type="button" data-user-reset="${u.id}">بازیابی رمز</button>`);
+    return `<div class="user-access-row"><div class="user-access-main"><strong class="user-access-email">${escapeHtml(u.email||'')}</strong><div class="user-primary-line"><span class="user-display-name">${escapeHtml(u.name||'بدون نام')}</span><span class="user-role-pill">${escapeHtml(roleFa(u.role))}${self?' · شما':''}</span><span class="user-state-pill ${state}">${stateLabel}</span></div><div class="user-access-meta">${userPresenceHtml(u)}</div></div><div class="user-access-actions">${actions.join('')}</div></div>`;
   }).join('');
 }
+
 function userById(uid){return usersAdminCache.find(u=>u.id===uid||(u._docIds||[]).includes(uid));}
 function openUserApprove(uid){
   const u=userById(uid);if(!u)return;
   const role=(u.role&&u.role!=='pending'&&u.role!=='blocked')?u.role:'projectManager';
   showPrompt('تأیید و تعیین نقش',`<form id="userApproveForm"><label>نام نمایشی<input id="approveUserName" value="${escapeHtml(u.name||'')}" placeholder="نام کاربر"></label><label style="display:block;margin-top:10px">نقش<select id="approveUserRole"><option value="projectManager" ${role==='projectManager'?'selected':''}>مدیر پروژه</option><option value="siteSupervisor" ${role==='siteSupervisor'?'selected':''}>سرپرست اجرا</option><option value="admin" ${role==='admin'?'selected':''}>ادمین</option></select></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره دسترسی</button></div></form>`);
-  document.getElementById('userApproveForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;try{await updateUserGroup(u,{name:document.getElementById('approveUserName').value.trim(),role:document.getElementById('approveUserRole').value,active:true,blocked:false,hidden:false,approvedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});closeModal('promptModal');toast('دسترسی کاربر ذخیره شد');await openUsersAdmin();}catch(err){toast(authErrorMessage(err));if(btn)btn.disabled=false;}};
+  document.getElementById('userApproveForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;try{await updateUserGroup(u,{name:document.getElementById('approveUserName').value.trim(),role:document.getElementById('approveUserRole').value,active:true,blocked:false,hidden:false,approvedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});writeAuditLog('تغییر دسترسی کاربر',`دسترسی کاربر ${u.email||''} با نقش ${roleFa(document.getElementById('approveUserRole').value)} ذخیره شد.`,{kind:'userAccess',targetUserEmail:u.email||''});closeModal('promptModal');toast('دسترسی کاربر ذخیره شد');}catch(err){toast(authErrorMessage(err));if(btn)btn.disabled=false;}};
 }
 async function setUserBlocked(uid,blocked){
   const u=userById(uid);if(!u)return;
   if(blocked&&!confirm(`دسترسی «${u.email||''}» مسدود شود؟`))return;
   try{
     await updateUserGroup(u,blocked?{role:'blocked',active:false,blocked:true,hidden:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()}:{role:'pending',active:false,blocked:false,hidden:false,updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    toast(blocked?'کاربر مسدود شد':'کاربر برای تأیید مجدد فعال شد');await openUsersAdmin();
+    writeAuditLog(blocked?'مسدود کردن کاربر':'فعال‌سازی مجدد کاربر',`وضعیت کاربر ${u.email||''} تغییر کرد.`,{kind:'userStatus',targetUserEmail:u.email||''});toast(blocked?'کاربر مسدود شد':'کاربر برای تأیید مجدد فعال شد');
   }catch(err){toast(authErrorMessage(err));}
 }
 async function deleteBlockedUser(uid){
@@ -1158,7 +1324,7 @@ async function deleteBlockedUser(uid){
   if(!confirm(`«${u.email||''}» از فهرست کاربران حذف شود؟\n\nحساب Firebase Authentication برای امنیت حذف نمی‌شود و این کاربر همچنان مسدود خواهد ماند.`))return;
   try{
     await updateUserGroup(u,{role:'blocked',active:false,blocked:true,hidden:true,hiddenAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp()});
-    toast('کاربر مسدود از فهرست حذف شد');await openUsersAdmin();
+    writeAuditLog('پنهان کردن کاربر مسدود',`کاربر ${u.email||''} از فهرست مدیریت پنهان شد.`,{kind:'userHide',targetUserEmail:u.email||''});toast('کاربر مسدود از فهرست حذف شد');
   }catch(err){toast(authErrorMessage(err));}
 }
 async function sendUserPasswordReset(uid){
@@ -1291,13 +1457,23 @@ function systemLogEntriesHtml(){
   if(!systemLogs.length)return '<div class="empty compact-empty">هنوز رویدادی ثبت نشده است.</div>';
   return systemLogs.slice(0,16).map(item=>`<div class="system-log-entry"><div><strong>${escapeHtml(item.action)}</strong>${item.detail?`<div class="small muted">${escapeHtml(item.detail)}</div>`:''}</div><time>${escapeHtml(systemLogTime(item.time))}</time></div>`).join('');
 }
+
+function auditTime(item){return historyDateTime(item.createdAt||item.createdAtClient)}
+function auditLogHtml(items){
+  if(!items.length)return '<div class="empty compact-empty">هنوز تغییری ثبت نشده است.</div>';
+  return items.map(item=>`<article class="audit-log-card"><div class="audit-log-top"><strong>${escapeHtml(item.title||'تغییر')}</strong><time>${escapeHtml(auditTime(item))}</time></div>${item.contractName||item.penCode?`<div class="audit-contract">قرارداد: ${escapeHtml(item.contractName||'')} ${item.penCode?`— ${escapeHtml(item.penCode)}`:''}</div>`:''}<div class="audit-detail">${escapeHtml(item.detail||'')}</div><div class="audit-actor">${escapeHtml(item.actorName||item.actorEmail||'کاربر')} • ${escapeHtml(historyRoleLabel(item.actorRole||''))}</div></article>`).join('');
+}
+function renderAuditLog(){const box=document.getElementById('systemLogContent');if(box)box.innerHTML=`<div class="audit-log-list">${auditLogHtml(auditLogCache)}</div>`}
 function openSystemLogModal(){
-  addSystemLog('باز کردن لاگ سیستم','');
-  const box=document.getElementById('systemLogContent');
-  if(box)box.innerHTML=`<section class="system-log-grid">${systemLogSummaryRows()}</section><section class="system-log-history"><div class="section-head"><h3>رویدادهای اخیر</h3></div>${systemLogEntriesHtml()}</section>`;
-  openModal('systemLogModal');
+  if(!isAdminRole())return;openModal('systemLogModal');const box=document.getElementById('systemLogContent');if(box)box.innerHTML='<div class="history-loading">در حال دریافت تغییرات...</div>';if(auditLogCache.length)renderAuditLog();if(auditLogUnsub){try{auditLogUnsub()}catch{}}
+  auditLogUnsub=db.collection(AUDIT_COLLECTION).orderBy('createdAt','desc').limit(80).onSnapshot({includeMetadataChanges:true},snap=>{auditLogCache=snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(timestampMs(b.createdAt)||timestampMs(b.createdAtClient))-(timestampMs(a.createdAt)||timestampMs(a.createdAtClient)));renderAuditLog()},err=>{if(!auditLogCache.length&&box)box.innerHTML=`<div class="empty compact-empty">${escapeHtml(firestoreErrorMessage(err))}</div>`});
 }
 
+
+
+function openPanelsModal(){if(!isAdminRole())return;openModal('panelsModal')}
+function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=role==='siteSupervisor'?'siteSupervisor':'';configureRoleUi();closeModal('panelsModal');switchView('home');renderAll()}
+function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole())openContractForm()};
@@ -1324,11 +1500,14 @@ document.getElementById('contractForm').onsubmit=async e=>{
   try{
     const id=$('contractId').value.trim();
     if(id){
-      await updateContractRemote(id,data);
-      renderAll();
+      const before={...(getContract(id)||{})};
+      const saved=await updateContractRemote(id,data);
+      auditContractEdited(before,saved);
+      scheduleContractViewsRender();
       toast('اطلاعات قرارداد با موفقیت ویرایش شد');
     }else{
-      await createContractRemote(data);
+      const newId=await createContractRemote(data);
+      auditContractCreated({id:newId,...data});
       toast('قرارداد آنلاین در Firestore ثبت شد');
     }
     closeModal('contractModal');
@@ -1421,7 +1600,7 @@ async function doLogout(){
   if(!auth)return;
   if(!confirm('آیا مطمئن هستید که می‌خواهید از حساب کاربری خارج شوید؟'))return;
   const role=currentUserProfile?.role||'';
-  stopProfileSync();await auth.signOut();
+  queuePresenceWrite('away');stopPresenceTracking();stopProfileSync();await auth.signOut();
   const email=document.getElementById('loginEmail'),pass=document.getElementById('loginPassword'),remember=document.getElementById('rememberMe');
   if(role==='admin'){clearRememberedLogin();if(email)email.value='';if(pass)pass.value='';if(remember)remember.checked=false;}
   else{if(pass)pass.value='';await hydrateRememberedLogin();}
@@ -1435,7 +1614,7 @@ document.getElementById('roleGateLogoutBtn')?.addEventListener('click',doLogout)
 document.getElementById('themeToggleBtn')?.addEventListener('click',toggleTheme);
 syncThemeButton();
 document.getElementById('openUsersBtn')?.addEventListener('click',openUsersAdmin);
-document.querySelectorAll('[data-close-users]').forEach(b=>b.addEventListener('click',()=>closeModal('usersModal')));
+document.querySelectorAll('[data-close-users]').forEach(b=>b.addEventListener('click',closeUsersAdmin));
 document.getElementById('usersAdminList')?.addEventListener('click',e=>{
   const approve=e.target.closest('[data-user-approve]');if(approve){openUserApprove(approve.dataset.userApprove);return;}
   const block=e.target.closest('[data-user-block]');if(block){setUserBlocked(block.dataset.userBlock,true);return;}
@@ -1446,6 +1625,10 @@ document.getElementById('usersAdminList')?.addEventListener('click',e=>{
 
 document.getElementById('openBackupBtn')?.addEventListener('click',openBackupModal);
 document.getElementById('openSystemLogBtn')?.addEventListener('click',openSystemLogModal);
+document.getElementById('openPanelsBtn')?.addEventListener('click',openPanelsModal);
+document.querySelectorAll('[data-close-panels]').forEach(b=>b.addEventListener('click',()=>closeModal('panelsModal')));
+document.querySelectorAll('[data-preview-role]').forEach(b=>b.addEventListener('click',()=>enterPanelPreview(b.dataset.previewRole)));
+document.getElementById('exitPreviewBtn')?.addEventListener('click',exitPanelPreview);
 document.querySelectorAll('[data-close-system-log]').forEach(b=>b.addEventListener('click',()=>closeModal('systemLogModal')));
 document.querySelectorAll('[data-close-backup]').forEach(b=>b.addEventListener('click',()=>closeModal('backupModal')));
 document.getElementById('downloadBackupBtn')?.addEventListener('click',async e=>{

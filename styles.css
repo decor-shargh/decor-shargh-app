@@ -310,3 +310,74 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
   .contract-history-entry{grid-template-columns:1fr;gap:5px}
   .history-entry-meta{display:flex;justify-content:flex-start;gap:7px;flex-wrap:wrap}
 }
+
+/* v15 speed + supervisor + issues + audit + presence */
+.boot-logo{width:150px;height:150px;border-radius:28px}
+.boot-logo img,.install-icon img,.brand-login-logo,.brand-pending-logo,.top-brand>img{object-fit:cover}
+.preview-role-banner{margin:8px 14px 0;padding:8px 10px;border:1px solid #f0d6a4;background:#fff9ed;border-radius:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;font-weight:800;color:#8a5b11}
+.preview-role-banner button{border:0;background:#fff;border-radius:9px;padding:7px 9px;font-size:11px;font-weight:800;color:#6b4a15;cursor:pointer}
+.role-supervisor [data-nav="library"],.role-supervisor [data-nav="more"],.role-supervisor [data-view="library"],.role-supervisor [data-view="more"],.role-supervisor #newContractBtn{display:none!important}
+.role-supervisor .bottom-nav{grid-template-columns:repeat(2,1fr)!important}
+
+/* Contract issues */
+.contract-issue-preview{margin-top:8px;padding:8px 9px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;display:flex;align-items:flex-start;gap:7px;min-width:0}
+.issue-count-badge{flex:none;font-size:9.5px;font-weight:900;background:#ffedd5;color:#9a3412;border-radius:999px;padding:3px 6px;white-space:nowrap}
+.issue-latest-text{font-size:10.5px;line-height:1.6;color:#7c2d12;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.contract-issues-panel{padding:10px!important;margin-top:10px}
+.issue-compose{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;align-items:end;margin-bottom:8px}
+.issue-compose textarea{min-height:62px;resize:vertical;padding:8px 9px;font-size:12px}
+.issue-compose .primary{min-height:40px;padding:8px 10px;font-size:11px}
+.contract-issues-list{display:grid;gap:6px}
+.contract-issue-row{border:1px solid var(--line);border-radius:11px;padding:8px 9px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;background:var(--panel)}
+.contract-issue-row.done{opacity:.62;background:#fafafa}
+.issue-row-main{min-width:0}.issue-row-title{display:flex;align-items:flex-start;gap:6px;min-width:0}.issue-row-title strong{font-size:11.5px;line-height:1.6;min-width:0}.issue-row-meta{font-size:9px;color:var(--muted);margin-top:3px}
+.issue-status{font-size:8.5px;font-weight:900;border-radius:999px;padding:3px 5px;white-space:nowrap;flex:none}.issue-status.open{background:#fff7ed;color:#b45309}.issue-status.done{background:#ecfdf3;color:#047857}
+.issue-row-actions{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}.issue-row-actions button{min-height:30px;padding:5px 7px;font-size:9px;border-radius:8px}
+
+/* History performance / admin controls */
+.history-head-actions{display:flex;align-items:center;gap:7px}.history-clear-all,.history-delete-one{border:0;background:#fff1f2;color:#b42318;border-radius:7px;padding:4px 6px;font-size:8.5px;font-weight:800;cursor:pointer}
+.history-delete-one{margin-top:2px}
+
+/* Immutable audit log styled like Afrachoob */
+.system-log-card{width:min(94%,760px);max-height:90vh}
+.audit-log-list{display:grid;gap:8px}
+.audit-log-card{border:1px solid var(--line);border-radius:13px;padding:10px 11px;background:var(--panel);display:grid;gap:4px}
+.audit-log-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.audit-log-top strong{font-size:13px}.audit-log-top time{font-size:9.5px;color:var(--muted);direction:rtl;white-space:nowrap}
+.audit-contract{font-size:10.5px;color:#667085}.audit-detail{font-size:11px;line-height:1.7;color:var(--text)}.audit-actor{font-size:9.5px;color:var(--muted)}
+
+/* Panels preview */
+.panels-card{width:min(92%,560px)}.panel-preview-list{display:grid;gap:9px}.panel-preview-option{width:100%;display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:10px;align-items:center;text-align:right;border:1px solid var(--line);background:var(--panel);border-radius:13px;padding:10px 12px;color:var(--text);cursor:pointer}.panel-preview-option>span{width:38px;height:38px;border-radius:11px;background:#f7f5ef;display:grid;place-items:center;font-size:19px}.panel-preview-option div{display:grid;gap:2px}.panel-preview-option strong{font-size:13px}.panel-preview-option small{font-size:10px;color:var(--muted)}.panel-preview-option>b{color:var(--muted)}
+
+/* Compact user management + live presence */
+.users-card{width:min(94%,700px);padding:12px}.users-card .modal-head{margin-bottom:8px}.users-card .modal-head h3{font-size:16px}.users-card .modal-head p{font-size:10px;line-height:1.6;margin-top:2px}
+.users-admin-list{display:grid;gap:7px}.user-access-row{grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:9px 10px;border-radius:12px}.user-access-main{display:grid;gap:3px}.user-primary-line{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.user-display-name{font-size:12.5px;line-height:1.4}.user-access-email{font-size:10px;font-weight:500;color:var(--muted);direction:ltr;text-align:right;overflow-wrap:anywhere}.user-access-meta{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-top:1px}.user-role-pill,.user-state-pill{font-size:9px;padding:3px 6px}.user-presence{font-size:9px;color:var(--muted);display:inline-flex;align-items:center;gap:4px}.user-presence.online{color:#047857;font-weight:800}.user-presence.online i{width:6px;height:6px;border-radius:50%;background:#10b981;box-shadow:0 0 0 2px rgba(16,185,129,.14)}.user-access-actions{gap:4px}.user-access-actions button{min-height:31px;padding:5px 7px;font-size:9px;border-radius:8px}
+
+:root[data-theme="dark"] .preview-role-banner{background:#2a2112;border-color:#59431c;color:#f4c96f}:root[data-theme="dark"] .preview-role-banner button{background:#151517;color:#f4c96f}
+:root[data-theme="dark"] .contract-issue-preview{background:#2a1c10;border-color:#5f391d}.issue-latest-text{color:#9a3412}:root[data-theme="dark"] .issue-latest-text{color:#fdba74}:root[data-theme="dark"] .issue-count-badge{background:#4a2915;color:#fdba74}
+:root[data-theme="dark"] .contract-issue-row.done{background:#111214}:root[data-theme="dark"] .history-clear-all,:root[data-theme="dark"] .history-delete-one{background:#32191d;color:#fecaca}:root[data-theme="dark"] .panel-preview-option>span{background:#232326}
+
+@media(max-width:560px){
+  .boot-logo{width:138px;height:138px}
+  .preview-role-banner{margin:6px 10px 0;padding:7px 8px;font-size:10px}.preview-role-banner button{font-size:9px;padding:6px 7px}
+  .issue-compose{grid-template-columns:1fr}.issue-compose .primary{width:100%}
+  .contract-issue-row{grid-template-columns:1fr;gap:5px}.issue-row-actions{justify-content:flex-start}
+  .user-access-row{grid-template-columns:1fr;padding:8px 9px}.user-access-actions{justify-content:flex-start}.user-access-actions button{flex:0 0 auto}
+  .audit-log-card{padding:9px}.audit-log-top strong{font-size:12px}.audit-detail{font-size:10.5px}.audit-contract{font-size:10px}
+}
+
+/* v15 final polish: speed + compact users */
+.user-access-row{align-items:center}
+.user-access-email{display:block;font-size:12.5px!important;font-weight:800!important;color:var(--text)!important;line-height:1.35;direction:ltr;text-align:right;overflow-wrap:anywhere}
+.user-primary-line{margin-top:2px;gap:5px!important}
+.user-display-name{font-size:10.5px!important;color:var(--muted);font-weight:600}
+.user-access-meta{margin-top:2px!important}
+.user-access-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;max-width:220px}
+.user-access-actions .text-btn{padding-inline:5px}
+@media(max-width:560px){
+  .users-card{width:min(94vw,720px)}
+  .user-access-row{grid-template-columns:1fr!important;padding:8px 9px!important;gap:6px!important}
+  .user-access-actions{max-width:none;justify-content:flex-start;gap:4px!important}
+  .user-access-actions button{min-height:29px!important;padding:4px 7px!important;font-size:8.5px!important}
+  .user-access-email{font-size:11.5px!important}
+  .user-display-name{font-size:10px!important}
+}

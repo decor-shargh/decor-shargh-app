@@ -15,6 +15,7 @@ service cloud.firestore {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && userProfile().active == true
+        && userProfile().blocked != true
         && userProfile().role == roleName;
     }
 
@@ -26,60 +27,112 @@ service cloud.firestore {
       return isActiveRole("siteSupervisor");
     }
 
+    function isActiveAppUser() {
+      return isAdmin() || isSiteSupervisor();
+    }
+
     match /users/{userId} {
-      // هر کاربر فقط پروفایل خودش را می‌بیند؛ ادمین همه کاربران را می‌بیند.
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
-      // ثبت نام جدید: فقط ساخت پروفایل شخصی با نقش pending و دسترسی غیرفعال.
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.role == "pending"
         && request.resource.data.active == false
         && request.resource.data.email == request.auth.token.email;
 
-      // نقش، فعال‌سازی و مسدودسازی فقط توسط ادمین تغییر می‌کند.
-      allow update, delete: if isAdmin();
+      // Admin manages access. Every active user can only update their own presence fields.
+      allow update: if isAdmin() || (
+        signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastActiveAt',
+          'lastSeenAt',
+          'presenceState',
+          'presenceUpdatedAt'
+        ])
+      );
+
+      allow delete: if isAdmin();
     }
 
     match /contracts/{contractId} {
-      // Admin و سرپرست اجرای فعال قراردادها را می‌بینند.
       allow read: if isAdmin() || isSiteSupervisor();
-
-      // ساخت و حذف قرارداد فقط برای Admin است.
       allow create, delete: if isAdmin();
 
-      // Admin ویرایش کامل دارد. سرپرست اجرا فقط فیلدهای مربوط به پیشرفت و
-      // تکمیل خودکار قرارداد را می‌تواند تغییر دهد؛ ساختار فعالیت‌ها دست‌نخورده می‌ماند.
+      // Admin has full edit access. Site supervisor may only update execution progress
+      // and the denormalized open-issue summary shown on contract cards.
       allow update: if isAdmin() || (
         isSiteSupervisor()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'progressByActivity',
           'status',
           'completedAt',
+          'openIssueCount',
+          'latestOpenIssue',
           'updatedAt',
           'updatedBy',
           'appVersion'
         ])
         && request.resource.data.updatedBy == request.auth.uid
-        && request.resource.data.progressByActivity is map
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']) || request.resource.data.progressByActivity is map)
         && (request.resource.data.status == resource.data.status || request.resource.data.status in ['active', 'completed'])
       );
 
       match /history/{historyId} {
-        // تاریخچه فقط در صورت درخواست خوانده می‌شود و برای Admin/سرپرست اجرا قابل مشاهده است.
         allow read: if isAdmin() || isSiteSupervisor();
-
-        // رکورد تاریخچه فقط توسط همان کاربر فعال ایجاد می‌شود و immutable است.
-        allow create: if (isAdmin() || isSiteSupervisor())
+        allow create: if isActiveAppUser()
           && request.resource.data.contractId == contractId
           && request.resource.data.changedByUid == request.auth.uid;
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
 
-        allow update, delete: if isAdmin();
+      match /issues/{issueId} {
+        allow read: if isAdmin() || isSiteSupervisor();
+
+        allow create: if isActiveAppUser()
+          && request.resource.data.contractId == contractId
+          && request.resource.data.createdByUid == request.auth.uid;
+
+        // Supervisor can edit/complete only issues created by them. Admin can manage all.
+        allow update: if isAdmin() || (
+          isSiteSupervisor()
+          && resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.contractId == resource.data.contractId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'text',
+            'status',
+            'completedAt',
+            'updatedAt',
+            'updatedAtClient'
+          ])
+        );
+
+        allow delete: if isAdmin() || (
+          isSiteSupervisor()
+          && resource.data.createdByUid == request.auth.uid
+        );
       }
     }
 
-    // سایر اطلاعات کاری همچنان فقط برای Admin فعال قابل دسترسی است.
-    match /{document=**} {
+    // Immutable audit log. It can be read by Admin, but nobody can edit or delete it.
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isActiveAppUser()
+        && request.resource.data.actorUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /activityCategories/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /activityLibrary/{docId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /appMeta/{docId} {
       allow read, write: if isAdmin();
     }
   }

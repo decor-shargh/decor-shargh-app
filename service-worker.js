@@ -1,15 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v14-20260927-site-supervisor-quick-update-history';
+const CACHE_NAME = 'decor-shargh-v15-20260927-speed-offline-issues-audit-presence-panels';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=14',
-  './app.js?v=14',
-  './manifest.webmanifest?v=14',
-  './brand-logo.png?v=14',
-  './brand-mark.png?v=14',
-  './icon-192.png?v=14',
-  './icon-512.png?v=14',
-  './apple-touch-icon.png?v=14',
+  './styles.css?v=15',
+  './app.js?v=15',
+  './manifest.webmanifest?v=15',
+  './brand-ui.webp?v=15',
+  './icon-192.png?v=15',
+  './icon-512.png?v=15',
+  './apple-touch-icon.png?v=15',
   './version.json'
 ];
 
