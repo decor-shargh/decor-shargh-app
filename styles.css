@@ -128,3 +128,21 @@
 :root[data-theme="dark"] .boot-splash{background:#fff;color:#171717}
 
 @media(max-width:560px){.user-access-row{grid-template-columns:1fr}.user-access-actions{justify-content:stretch}.user-access-actions button{flex:1}.top-actions{gap:6px}.theme-toggle-btn{width:38px;min-width:38px;height:38px}}
+
+
+/* v12 compact mobile home layout + updated logo sizing */
+:root{--radius:16px;--shadow:0 8px 22px rgba(17,24,39,.07)}
+.app-shell{padding-bottom:80px}
+.topbar{padding:16px 16px 10px}
+.top-brand{gap:8px}.top-brand>img{width:38px;height:38px;border-radius:11px}
+.topbar h1{font-size:18px;margin-top:2px}.eyebrow{font-size:11px}
+.top-actions{gap:6px}.logout-btn,.theme-toggle-btn{min-height:38px}
+.logout-btn{padding:8px 12px;font-size:12px}.theme-toggle-btn{width:38px;min-width:38px;height:38px;border-radius:11px;font-size:18px}
+main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 14px;border-radius:16px}.kpi .value{font-size:23px;margin-top:4px}.kpi .label{font-size:12px}
+.panel{padding:14px;margin-bottom:12px;border-radius:16px}.section-head{margin-bottom:10px}.section-head h2{font-size:17px}.small{font-size:11px}
+.card-list,.contract-grid,.progress-chart{gap:10px}.attention-item{padding:10px 12px;border-radius:12px;gap:10px}.attention-item strong{font-size:15px}.attention-item .badge{font-size:11px;padding:5px 8px;line-height:1.5}
+.bar-row{grid-template-columns:minmax(92px,150px) 1fr 46px;gap:8px}.bar-bg{height:10px}.status-chart-wrap{gap:18px}.status-donut{width:148px;height:148px}.donut-center{width:88px;height:88px}.donut-center strong{font-size:22px}.donut-center span,.legend-row{font-size:12px}.legend-row{padding:6px 0}
+.bottom-nav{padding:6px max(8px,env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom))}.nav-item{padding:6px 5px;gap:3px;border-radius:12px;font-size:12px}.nav-item span{font-size:18px}
+.brand-login-logo{width:132px}.brand-pending-logo{width:82px;height:82px}.boot-logo,.install-icon{padding:4px}
+@media(max-width:820px){.section-head h2{font-size:16px}}
+@media(max-width:560px){.app-shell{padding-bottom:76px}.topbar{padding:12px 12px 8px}.top-brand>img{width:34px;height:34px;border-radius:10px}.topbar h1{font-size:17px}.eyebrow{font-size:10px}main{padding:10px 12px}.kpi-grid{gap:8px;margin-bottom:10px}.kpi{padding:11px 12px}.kpi .value{font-size:20px}.panel{padding:12px;margin-bottom:10px}.section-head h2{font-size:15px}.attention-item{align-items:flex-start}.attention-item .badge{max-width:58%;text-align:center}.bar-row{grid-template-columns:84px 1fr 40px}.status-donut{width:132px;height:132px}.donut-center{width:80px;height:80px}.donut-center strong{font-size:20px}.status-legend{min-width:0;width:100%}.bottom-nav{padding:5px max(6px,env(safe-area-inset-right)) calc(5px + env(safe-area-inset-bottom))}.nav-item{padding:5px 4px;font-size:11px}.nav-item span{font-size:17px}.brand-login-logo{width:118px}}

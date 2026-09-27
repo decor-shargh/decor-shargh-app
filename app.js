@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="11.0.0";
+const APP_VERSION="12.0.0";
 
 let auth=null;
 let db=null;
@@ -687,7 +687,7 @@ function renderHome(){const active=activeContracts();const near=active.filter(c=
  ['فعال',active.length,'blue','active'],['نزدیک سررسید',near.length,'orange','near'],['بحرانی',critical.length,'red','critical'],['میانگین پیشرفت',`${avg}٪`,'','progress']
 ].map(([l,v,cl,key])=>`<div class="kpi ${cl}" data-kpi="${key}"><div class="label">${l}</div><div class="value">${toFa(v)}</div></div>`).join('');
  const attention=[...critical,...state.contracts.filter(c=>c.status==='stopped'),...near].filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i);document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="small muted">کد ${escapeHtml(c.penCode)} • پیشرفت ${toFa(contractProgress(c))}٪</div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
- document.getElementById('activeProjects').innerHTML=active.length?active.sort((a,b)=>jalaliToDate(b.contractDate)-jalaliToDate(a.contractDate)).map(contractCard).join(''):'<div class="empty">هنوز قرارداد فعالی ثبت نشده.</div>';
+ 
  renderCharts(active);
 }
 function renderCharts(active){const pc=document.getElementById('progressChart');pc.innerHTML=active.length?active.map(c=>{const p=contractProgress(c);return `<div class="bar-row"><div class="small">${escapeHtml(c.customerName)}</div><div class="bar-bg"><div class="bar" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>`}).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
