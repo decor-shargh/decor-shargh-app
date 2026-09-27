@@ -8,6 +8,8 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
+const APP_VERSION="6.0.0";
+
 let auth=null;
 let db=null;
 let currentAdmin=null;
@@ -356,26 +358,46 @@ function contractDocPayload(c){
   };
 }
 async function migrateLegacyContractsIfNeeded(){
-  const metaRef=db.doc(CONTRACT_META_DOC);
-  const meta=await metaRef.get();
-  if(meta.exists)return;
-  const existing=await db.collection(CONTRACT_COLLECTION).limit(1).get();
+  // Migration is intentionally PER DEVICE, not controlled by one global Firestore flag.
+  // Older cached builds could still have contracts only in this browser's LocalStorage.
+  // On every startup we safely copy only missing legacy contract IDs to Firestore.
   const legacy=legacyLocalContracts();
+  if(!legacy.length)return;
+
   let migratedCount=0;
-  if(existing.empty&&legacy.length){
-    let batch=db.batch(),ops=0;
-    for(const raw of legacy){
-      const ref=raw.id?db.collection(CONTRACT_COLLECTION).doc(String(raw.id)):db.collection(CONTRACT_COLLECTION).doc();
-      const payload=contractDocPayload({...raw,id:ref.id});
-      batch.set(ref,{...payload,createdAt:raw.createdAt||firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),migratedFromLocalStorage:true,createdBy:currentAdmin?.uid||''},{merge:true});
-      migratedCount++;ops++;
-      if(ops>=450){await batch.commit();batch=db.batch();ops=0}
-    }
-    if(ops)await batch.commit();
+  let batch=db.batch();
+  let ops=0;
+  for(const raw of legacy){
+    const legacyId=String(raw?.id||'').trim();
+    if(!legacyId)continue;
+    const ref=db.collection(CONTRACT_COLLECTION).doc(legacyId);
+    const remote=await ref.get();
+    if(remote.exists)continue;
+    const payload=contractDocPayload({...raw,id:legacyId});
+    batch.set(ref,{
+      ...payload,
+      createdAt:raw.createdAt||firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt:firebase.firestore.FieldValue.serverTimestamp(),
+      migratedFromLocalStorage:true,
+      migratedBy:currentAdmin?.uid||'',
+      migratedAt:firebase.firestore.FieldValue.serverTimestamp()
+    },{merge:true});
+    migratedCount++;
+    ops++;
+    if(ops>=400){await batch.commit();batch=db.batch();ops=0}
   }
-  await metaRef.set({migrated:true,migratedCount,migratedAt:firebase.firestore.FieldValue.serverTimestamp()},{merge:true});
-  if(migratedCount)toast(`${toFa(migratedCount)} قرارداد قبلی به Firestore منتقل شد`);
+  if(ops)await batch.commit();
+
+  // Keep a browser-local backup, then clear the old source so stale local data is never treated as live data again.
+  if(migratedCount){
+    try{
+      localStorage.setItem(`${STORAGE_KEY}_backup_${Date.now()}`,JSON.stringify({contracts:legacy,migratedAt:new Date().toISOString()}));
+      localStorage.removeItem(STORAGE_KEY);
+    }catch{}
+    toast(`${toFa(migratedCount)} قرارداد محلی به Firestore منتقل شد`);
+  }
 }
+
 function startContractsSync(){
   stopContractSync();
   contractsUnsub=db.collection(CONTRACT_COLLECTION).onSnapshot(snap=>{
@@ -391,11 +413,17 @@ async function initContractsFirestore(){
   state.contracts=snap.docs.map(d=>({id:d.id,...d.data()}));
   contractsReady=true;
   startContractsSync();
+  // Diagnostic marker: proves this build reached Firestore successfully.
+  db.doc('appMeta/runtime').set({appVersion:APP_VERSION,lastSeenAt:firebase.firestore.FieldValue.serverTimestamp(),lastSeenBy:currentAdmin?.uid||''},{merge:true}).catch(()=>{});
 }
 async function createContractRemote(data){
+  if(!db||!currentAdmin)throw Object.assign(new Error('firestore-not-ready'),{code:'unavailable'});
   const ref=db.collection(CONTRACT_COLLECTION).doc();
   const payload=contractDocPayload({...data,id:ref.id,status:'active'});
-  await ref.set({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:currentAdmin?.uid||''});
+  await ref.set({...payload,createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),createdBy:currentAdmin.uid,appVersion:APP_VERSION});
+  // Read-after-write verification: do not tell the user it saved unless Firestore can read it back.
+  const check=await ref.get();
+  if(!check.exists)throw Object.assign(new Error('firestore-write-not-confirmed'),{code:'unavailable'});
   return ref.id;
 }
 async function updateContractRemote(id,patch){
@@ -550,7 +578,7 @@ function libraryPrompt(cat=null,act=null){
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>openContractForm();
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
-document.getElementById('contractForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim(),activities:contractFormActivities.map(a=>({...a}))};if(!data.contractDate||!data.endDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}try{const id=contractId.value;if(id){await updateContractRemote(id,data);toast('قرارداد در Firestore ویرایش شد')}else{await createContractRemote(data);toast('قرارداد در Firestore ثبت شد')}closeModal('contractModal');switchView('contracts')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}};
+document.getElementById('contractForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;const data={customerName:customerName.value.trim(),penCode:penCode.value.trim(),amount:toEn(contractAmount.value).replace(/,/g,''),contractDate:normalizeDate(contractDate.value),endDate:normalizeDate(endDate.value),compDate:normalizeDate(compDate.value),notes:contractNotes.value.trim(),activities:contractFormActivities.map(a=>({...a}))};if(!data.contractDate||!data.endDate){if(btn)btn.disabled=false;return toast('فرمت تاریخ را مثل ۱۴۰۵/۰۷/۰۱ وارد کنید')}try{const id=contractId.value;if(id){await updateContractRemote(id,data);toast('قرارداد در Firestore ویرایش شد')}else{await createContractRemote(data);toast('قرارداد آنلاین در Firestore ثبت شد')}closeModal('contractModal');switchView('contracts')}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}};
 ['filterCustomer','filterFrom','filterTo','filterStatus'].forEach(id=>document.getElementById(id).addEventListener('input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterFrom.value='';filterTo.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
@@ -607,5 +635,21 @@ if(logoutBtn)logoutBtn.addEventListener('click',async()=>{
   finally{logoutBtn.disabled=false;}
 });
 
+async function checkForAppUpdate(){
+  try{
+    const res=await fetch(`version.json?t=${Date.now()}`,{cache:'no-store'});
+    if(!res.ok)return;
+    const info=await res.json();
+    if(info?.version&&info.version!==APP_VERSION){
+      const regs='serviceWorker' in navigator?await navigator.serviceWorker.getRegistrations():[];
+      await Promise.all(regs.map(r=>r.update().catch(()=>{})));
+      location.reload();
+    }
+  }catch{}
+}
+window.addEventListener('focus',checkForAppUpdate);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')checkForAppUpdate()});
+
 setupPwaInstall();
 initFirebaseAuth();
+checkForAppUpdate();
