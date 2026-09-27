@@ -15,7 +15,7 @@ service cloud.firestore {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && userProfile().active == true
-        && userProfile().blocked != true
+        && (!userProfile().keys().hasAny(['blocked']) || userProfile().blocked != true)
         && userProfile().role == roleName;
     }
 
