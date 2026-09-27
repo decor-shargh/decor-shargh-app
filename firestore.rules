@@ -67,6 +67,8 @@ service cloud.firestore {
           'progressByActivity',
           'status',
           'completedAt',
+          'statusReason',
+          'statusDate',
           'openIssueCount',
           'latestOpenIssue',
           'updatedAt',
@@ -75,7 +77,11 @@ service cloud.firestore {
         ])
         && request.resource.data.updatedBy == request.auth.uid
         && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']) || request.resource.data.progressByActivity is map)
-        && (request.resource.data.status == resource.data.status || request.resource.data.status in ['active', 'completed'])
+        && (
+          request.resource.data.status == resource.data.status
+          || request.resource.data.status in ['pendingStart', 'inProgress', 'stopped', 'terminated']
+          || (request.resource.data.status == 'completed' && request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']))
+        )
       );
 
       match /history/{historyId} {

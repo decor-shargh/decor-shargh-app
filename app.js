@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.3.0";
+const APP_VERSION="15.5.0";
 
 let auth=null;
 let db=null;
@@ -443,7 +443,7 @@ function toggleTheme(){setTheme(currentTheme()==='dark'?'light':'dark');}
 
 const STORAGE_KEY='decorSharghAdminV1';
 const faDigits='۰۱۲۳۴۵۶۷۸۹';
-const statusLabels={active:'فعال',stopped:'متوقف',terminated:'فسخ‌شده',completed:'خاتمه‌یافته'};
+const statusLabels={pendingStart:'در انتظار شروع',inProgress:'در حال انجام',stopped:'متوقف',terminated:'فسخ‌شده',completed:'خاتمه‌یافته',active:'در حال انجام'};
 const initialLibrary=[
  {name:'سقف',items:[['سقف کاذب کناف',7,7,6],['سقف رابیتس',8,7,8],['سقف کشسان',4,5,3],['سقف PVC',4,4,3],['سقف چوبی / دکوراتیو',6,7,5],['باکس نور مخفی',4,4,4],['نورپردازی سقف',4,5,4],['ترمیم سقف موجود',3,3,3]]},
  {name:'کف',items:[['سرامیک کف',7,7,6],['سنگ کف',8,8,7],['پارکت',5,6,4],['لمینت',4,5,3],['کفپوش',3,4,3]]},
@@ -623,7 +623,7 @@ function contractDocPayload(c){
     endDate:String(c.endDate||''),
     compDate:String(c.compDate||''),
     notes:String(c.notes||''),
-    status:c.status||'active',
+    status:effectiveContractStatus(c),
     activities:Array.isArray(c.activities)?c.activities.map(a=>({
       id:a.id||uid('ca'),
       libraryId:a.libraryId||'',
@@ -731,7 +731,7 @@ function auditContractEdited(before,after){
 async function createContractRemote(data){
   if(!db||!currentAdmin||!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
   const ref=db.collection(CONTRACT_COLLECTION).doc();
-  const payload=contractDocPayload({...data,id:ref.id,status:'active'});
+  const payload=contractDocPayload({...data,id:ref.id,status:'pendingStart'});
   const nowIso=new Date().toISOString();
   const optimistic={id:ref.id,...payload,createdAtClient:nowIso,updatedAtClient:nowIso,createdBy:currentAdmin.uid,appVersion:APP_VERSION,_pendingWrite:true};
 
@@ -811,6 +811,8 @@ function refreshProgressUi(c,activityId){
   const row=document.querySelector(`[data-activity-row="${CSS.escape(activityId)}"]`);
   if(row){row.classList.toggle('done',done);const txt=row.querySelector('.supervisor-activity-title span');if(txt)txt.textContent=`پیشرفت فعلی: ${toFa(progress)}٪`;const title=row.querySelector('.supervisor-activity-title strong,.activity-title-text');if(title)title.classList.toggle('done',done);const input=row.querySelector('input[type="number"]');if(input)input.value=progress;const doneBtn=row.querySelector('[data-supervisor-done],[data-done]');if(doneBtn){doneBtn.disabled=done;doneBtn.classList.toggle('is-done',done)}}
   const total=document.querySelector('.detail-total-progress');if(total)total.textContent=`${toFa(contractProgress(c))}٪`;
+  const currentStatus=effectiveContractStatus(c);const statusEl=document.querySelector('.detail-contract-status');if(statusEl)statusEl.textContent=statusLabels[currentStatus]||currentStatus;
+  const subtitle=document.getElementById('detailSubtitle');if(subtitle)subtitle.textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[currentStatus]||currentStatus}`;
   scheduleContractViewsRender();
 }
 async function updateActivityProgressRemote(c,activityId,newProgress,action='manual'){
@@ -819,19 +821,22 @@ async function updateActivityProgressRemote(c,activityId,newProgress,action='man
   const nextProgress=Math.max(0,Math.min(100,Number(newProgress)||0));
   const oldProgress=effectiveActivityProgress(c,activity);
   if(oldProgress===nextProgress)return {saved:c,changed:false};
+  const previousEffectiveStatus=effectiveContractStatus(c);
   const previousMap={...(c.progressByActivity||{})};const previousStatus=c.status;const previousCompleted=c.completedAt;
   c.progressByActivity={...previousMap,[activityId]:nextProgress};syncAutoCompleted(c);
+  const nextEffectiveStatus=effectiveContractStatus(c);
   refreshProgressUi(c,activityId);
   const ref=db.collection(CONTRACT_COLLECTION).doc(c.id),historyRef=ref.collection('history').doc();
   const batch=db.batch();
   const patch={
     [`progressByActivity.${activityId}`]:nextProgress,
-    status:c.status||'active',completedAt:c.completedAt||null,
+    status:effectiveContractStatus(c),completedAt:c.completedAt||null,
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION
   };
   batch.update(ref,patch);
-  batch.set(historyRef,{contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION});
-  addAuditToBatch(batch,action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,kind:action==='done'?'activityDone':'progress'});
+  batch.set(historyRef,{contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION});
+  const statusChangeText=previousEffectiveStatus!==nextEffectiveStatus?` وضعیت قرارداد از «${statusLabels[previousEffectiveStatus]||previousEffectiveStatus}» به «${statusLabels[nextEffectiveStatus]||nextEffectiveStatus}» تغییر کرد.`:'';
+  addAuditToBatch(batch,action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.${statusChangeText}`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,kind:action==='done'?'activityDone':'progress'});
   const pending=batch.commit();
   pending.catch(err=>{
     if(String(err?.code||'').includes('permission-denied')){
@@ -889,9 +894,10 @@ function duePhrase(n,label){
   return `${label}: ${toFa(n)} روز مانده`;
 }
 function dueState(c){
-  if(c.status==='completed')return {key:'completed',text:'خاتمه‌یافته'};
-  if(c.status==='stopped')return {key:'stopped',text:'متوقف'};
-  if(c.status==='terminated')return {key:'terminated',text:'فسخ‌شده'};
+  const status=effectiveContractStatus(c);
+  if(status==='completed')return {key:'completed',text:'خاتمه‌یافته'};
+  if(status==='stopped')return {key:'stopped',text:'متوقف'};
+  if(status==='terminated')return {key:'terminated',text:'فسخ‌شده'};
   const original=daysUntilDate(c.endDate);
   if(original===null)return {key:'normal',text:'بدون تاریخ معتبر'};
   const revised=c.compDate?daysUntilDate(c.compDate):null;
@@ -922,13 +928,28 @@ function effectiveActivityProgress(c,a){
 }
 function contractProgress(c){if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+(effectiveActivityProgress(c,a)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
 function activityWeight(c,a){const total=c.activities.reduce((s,x)=>s+(Number(x.baseScore)||0),0);return total?+(a.baseScore/total*100).toFixed(1):0}
-function syncAutoCompleted(c){if(c.activities?.length&&c.activities.every(a=>effectiveActivityProgress(c,a)===100)){c.status='completed';c.completedAt=new Date().toISOString()}else if(c.status==='completed'){c.status='active';delete c.completedAt}}
+function hasAnyContractProgress(c){return (c.activities||[]).some(a=>effectiveActivityProgress(c,a)>0)}
+function allContractActivitiesDone(c){return !!c.activities?.length&&c.activities.every(a=>effectiveActivityProgress(c,a)===100)}
+function automaticContractStatus(c){if(allContractActivitiesDone(c))return 'completed';return hasAnyContractProgress(c)?'inProgress':'pendingStart'}
+function effectiveContractStatus(c){
+  const raw=String(c?.status||'');
+  if(raw==='stopped'||raw==='terminated')return raw;
+  // Legacy `active` contracts are interpreted from their real progress without a risky bulk migration.
+  return automaticContractStatus(c||{});
+}
+function syncAutoCompleted(c){
+  if(allContractActivitiesDone(c)){c.status='completed';c.completedAt=c.completedAt||new Date().toISOString();return}
+  if(c.status==='stopped'||c.status==='terminated'){c.completedAt=null;return}
+  c.status=hasAnyContractProgress(c)?'inProgress':'pendingStart';
+  c.completedAt=null;
+}
 function statusClass(c){const d=dueState(c);return d.key}
 function escapeHtml(s=''){return String(s).replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove('show'),1800)}
 
 function getContract(id){return state.contracts.find(c=>c.id===id)}
-function activeContracts(){return state.contracts.filter(c=>c.status==='active')}
+function contractEndSort(a,b){const ad=jalaliToDate(a.endDate),bd=jalaliToDate(b.endDate);const at=ad?ad.getTime():Number.POSITIVE_INFINITY,bt=bd?bd.getTime():Number.POSITIVE_INFINITY;if(at!==bt)return at-bt;const ac=jalaliToDate(a.contractDate),bc=jalaliToDate(b.contractDate);return (bc?bc.getTime():0)-(ac?ac.getTime():0)}
+function unfinishedProjectContracts(){return state.contracts.filter(c=>['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c))).sort(contractEndSort)}
 
 function contractIssueBadge(c){
   const count=Math.max(0,Number(c?.openIssueCount)||0),latest=c?.latestOpenIssue;
@@ -937,7 +958,7 @@ function contractIssueBadge(c){
 }
 function adminContractCard(c){const p=contractProgress(c),ds=dueState(c);const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ${toFa(effectiveActivityProgress(c,a))}٪</span>`).join('')||'<span class="muted small">هنوز فعالیتی تعریف نشده</span>';return `<article class="contract-card ${statusClass(c)}" data-open-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
-<div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge">${escapeHtml(statusLabels[c.status]||'')}</span></div>
+<div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge">${escapeHtml(statusLabels[effectiveContractStatus(c)]||'')}</span></div>
 ${contractIssueBadge(c)}
 <div class="progress-row"><span class="small">پیشرفت</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="activities-mini">${acts}</div>
@@ -945,7 +966,7 @@ ${contractIssueBadge(c)}
 </article>`}
 
 function supervisorContractCard(c){const p=contractProgress(c),ds=dueState(c);return `<article class="contract-card supervisor-contract-card ${statusClass(c)}" data-open-contract="${c.id}">
-<div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="supervisor-card-status">${escapeHtml(statusLabels[c.status]||'')}</div></div>
+<div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="supervisor-card-status">${escapeHtml(statusLabels[effectiveContractStatus(c)]||'')}</div></div>
 <div class="supervisor-contract-due badge ${ds.key}">${escapeHtml(ds.text)}</div>
 ${contractIssueBadge(c)}
 <div class="progress-row supervisor-progress-row"><span class="small">پیشرفت کل</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
@@ -955,17 +976,67 @@ ${contractIssueBadge(c)}
 function contractCard(c){return isSupervisorUi()?supervisorContractCard(c):adminContractCard(c)}
 
 
-function renderHome(){const active=activeContracts();const near=active.filter(c=>dueState(c).key==='near');const critical=active.filter(c=>['critical','overdue'].includes(dueState(c).key));const avg=active.length?+(active.reduce((s,c)=>s+contractProgress(c),0)/active.length).toFixed(1):0;document.getElementById('kpiGrid').innerHTML=[
- ['فعال',active.length,'blue','active'],['نزدیک سررسید',near.length,'orange','near'],['بحرانی',critical.length,'red','critical'],['میانگین پیشرفت',`${avg}٪`,'','progress']
-].map(([l,v,cl,key])=>`<div class="kpi ${cl}" data-kpi="${key}"><div class="label">${l}</div><div class="value">${toFa(v)}</div></div>`).join('');
- const attention=[...critical,...state.contracts.filter(c=>c.status==='stopped'),...near].filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i);document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="small muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}پیشرفت ${toFa(contractProgress(c))}٪</div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
- 
- renderCharts(active);
-}
-function renderCharts(active){const pc=document.getElementById('progressChart');pc.innerHTML=active.length?active.map(c=>{const p=contractProgress(c);return `<div class="bar-row"><div class="small">${escapeHtml(c.customerName)}</div><div class="bar-bg"><div class="bar" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>`}).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
- const counts={active:0,near:0,critical:0,stopped:0};state.contracts.forEach(c=>{if(c.status==='stopped')counts.stopped++;else if(c.status==='active'){const d=dueState(c).key;if(d==='near')counts.near++;else if(d==='critical'||d==='overdue')counts.critical++;else counts.active++;}});const total=Object.values(counts).reduce((a,b)=>a+b,0);document.getElementById('donutTotal').textContent=toFa(total);const colors=['#2563eb','#f59e0b','#dc2626','#6b7280'];let acc=0,parts=[];Object.values(counts).forEach((v,i)=>{const start=total?acc/total*100:0;acc+=v;const end=total?acc/total*100:100;parts.push(`${colors[i]} ${start}% ${end}%`)});document.getElementById('statusDonut').style.background=total?`conic-gradient(${parts.join(',')})`:'#e5e7eb';const labels=[['فعال',counts.active],['نزدیک سررسید',counts.near],['بحرانی',counts.critical],['متوقف',counts.stopped]];document.getElementById('statusLegend').innerHTML=labels.map((x,i)=>`<div class="legend-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colors[i]};margin-left:7px"></span>${x[0]}</span><strong>${toFa(x[1])}</strong></div>`).join('')}
+function renderHome(){
+  const all=[...state.contracts];
+  const unfinished=unfinishedProjectContracts();
+  const near=all.filter(c=>dueState(c).key==='near').sort(contractEndSort);
+  const critical=all.filter(c=>['critical','overdue'].includes(dueState(c).key)).sort(contractEndSort);
+  const completed=all.filter(c=>effectiveContractStatus(c)==='completed');
+  const avg=unfinished.length?+(unfinished.reduce((sum,c)=>sum+contractProgress(c),0)/unfinished.length).toFixed(1):0;
+  document.getElementById('kpiGrid').innerHTML=[
+    ['کل قراردادها',all.length,'blue','total'],
+    ['نزدیک سررسید',near.length,'orange','near'],
+    ['بحرانی',critical.length,'red','critical'],
+    ['خاتمه‌یافته',completed.length,'green','completed'],
+    ['میانگین پیشرفت',`${avg}٪`,'','progress']
+  ].map(([l,v,cl,key])=>`<div class="kpi ${cl}" data-kpi="${key}"><div class="label">${l}</div><div class="value">${toFa(v)}</div></div>`).join('');
 
-function renderContracts(){let arr=[...state.contracts].sort((a,b)=>{const ad=jalaliToDate(a.endDate),bd=jalaliToDate(b.endDate);const at=ad?ad.getTime():Number.POSITIVE_INFINITY,bt=bd?bd.getTime():Number.POSITIVE_INFINITY;if(at!==bt)return at-bt;const ac=jalaliToDate(a.contractDate),bc=jalaliToDate(b.contractDate);return (bc?bc.getTime():0)-(ac?ac.getTime():0)});const name=document.getElementById('filterCustomer').value.trim();const year=normalizeYear(document.getElementById('filterYear').value);const month=document.getElementById('filterMonth').value;const st=document.getElementById('filterStatus').value;if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));if(st)arr=arr.filter(c=>c.status===st);if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>'}
+  const stopped=all.filter(c=>effectiveContractStatus(c)==='stopped');
+  const attention=[...critical,...stopped,...near]
+    .filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i)
+    .sort(contractEndSort);
+  document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';
+  document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="small muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}پیشرفت ${toFa(contractProgress(c))}٪</div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
+
+  renderCharts(unfinished);
+}
+function renderCharts(unfinished){
+  const ordered=[...unfinished].sort(contractEndSort);
+  const pc=document.getElementById('progressChart');
+  pc.innerHTML=ordered.length?ordered.map(c=>{
+    const p=contractProgress(c),ds=dueState(c);
+    const alertTag=['critical','overdue'].includes(ds.key)
+      ? '<span class="progress-alert-tag critical">بحرانی</span>'
+      : ds.key==='near'
+        ? '<span class="progress-alert-tag near">نزدیک سررسید</span>'
+        : '';
+    return `<div class="bar-row"><div class="small bar-project-name">${escapeHtml(c.customerName)}</div><div class="bar-bg"><div class="bar" style="width:${p}%"></div></div><div class="bar-value-wrap"><strong>${toFa(p)}٪</strong>${alertTag}</div></div>`;
+  }).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
+
+  const counts={pendingStart:0,inProgress:0,stopped:0,terminated:0,completed:0};
+  state.contracts.forEach(c=>{const status=effectiveContractStatus(c);if(Object.prototype.hasOwnProperty.call(counts,status))counts[status]++});
+  const total=Object.values(counts).reduce((a,b)=>a+b,0);
+  document.getElementById('donutTotal').textContent=toFa(total);
+  const colors=['#64748b','#2563eb','#f59e0b','#dc2626','#16a34a'];
+  let acc=0,parts=[];
+  Object.values(counts).forEach((v,i)=>{const start=total?acc/total*100:0;acc+=v;const end=total?acc/total*100:100;parts.push(`${colors[i]} ${start}% ${end}%`)});
+  document.getElementById('statusDonut').style.background=total?`conic-gradient(${parts.join(',')})`:'#e5e7eb';
+  const labels=[['در انتظار شروع',counts.pendingStart],['در حال انجام',counts.inProgress],['متوقف',counts.stopped],['فسخ‌شده',counts.terminated],['خاتمه‌یافته',counts.completed]];
+  document.getElementById('statusLegend').innerHTML=labels.map((x,i)=>`<div class="legend-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colors[i]};margin-left:7px"></span>${x[0]}</span><strong>${toFa(x[1])}</strong></div>`).join('');
+}
+
+function renderContracts(){
+  let arr=[...state.contracts].sort(contractEndSort);
+  const name=document.getElementById('filterCustomer').value.trim();
+  const year=normalizeYear(document.getElementById('filterYear').value);
+  const month=document.getElementById('filterMonth').value;
+  const st=document.getElementById('filterStatus').value;
+  if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));
+  if(st)arr=arr.filter(c=>effectiveContractStatus(c)===st);
+  if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));
+  if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});
+  document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>';
+}
 
 function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>{const expanded=libraryExpandedCats.has(cat.id);const body=cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty compact-empty">فعالیتی در این دسته نیست.</div>';return `<section class="category-card ${expanded?'open':''}"><div class="category-head"><button class="category-toggle" type="button" data-lib-toggle="${cat.id}" aria-expanded="${expanded?'true':'false'}"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><span class="category-chevron">${expanded?'▾':'▸'}</span></button><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div><div class="category-body ${expanded?'':'is-hidden'}">${body}</div></section>`}).join('')}
 
@@ -1185,11 +1256,11 @@ function openSupervisorDetail(id){
   const c=getContract(id);if(!c)return;stopHistoryListener();stopIssuesListener();prewarmContractHistory(id);
   const p=contractProgress(c),ds=dueState(c);
   document.getElementById('detailTitle').textContent=c.customerName;
-  document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[c.status]}`;
+  document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[effectiveContractStatus(c)]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-  <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
-  <div class="supervisor-detail-tools"><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
+  <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
+  <div class="supervisor-detail-tools"><button class="status-change-btn" data-status-change="${c.id}">تغییر وضعیت قرارداد</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
   <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
   <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">درصد را وارد و «ثبت» را بزنید</span></div><div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی برای این قرارداد تعریف نشده است.</div>'}</div></section>
   ${issuesSectionHtml(c.id)}
@@ -1201,6 +1272,7 @@ function wireSupervisorDetail(c){
   document.querySelectorAll('[data-supervisor-progress]').forEach(inp=>{const selectAll=()=>window.setTimeout(()=>{try{inp.select()}catch{}},0);inp.addEventListener('focus',selectAll);inp.addEventListener('click',()=>{if(document.activeElement===inp)selectAll()});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector(`[data-supervisor-save="${inp.dataset.supervisorProgress}"]`)?.click()}})});
   document.querySelectorAll('[data-supervisor-save]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorSave,inp=document.querySelector(`[data-supervisor-progress="${id}"]`),a=(c.activities||[]).find(x=>x.id===id);if(!inp||!a)return;const value=Math.max(0,Math.min(100,Number(inp.value)||0));inp.value=value;const result=await updateActivityProgressRemote(c,id,value,'manual');if(result.changed){toast(navigator.onLine?'درصد ثبت شد':'درصد ذخیره شد؛ پس از اتصال همگام می‌شود')}else toast('درصد تغییری نکرده است')});
   document.querySelectorAll('[data-supervisor-done]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorDone;if(!(c.activities||[]).some(a=>a.id===id))return;const result=await updateActivityProgressRemote(c,id,100,'done');if(result.changed){toast(navigator.onLine?'فعالیت انجام شد':'انجام شد؛ پس از اتصال همگام می‌شود')}});
+  document.querySelector('[data-status-change]')?.addEventListener('click',()=>openStatusPrompt(c));
   document.querySelector('[data-toggle-history]')?.addEventListener('click',e=>toggleContractHistory(c.id,e.currentTarget));
 }
 
@@ -1209,11 +1281,11 @@ function openDetail(id){if(isSupervisorUi())return openSupervisorDetail(id);retu
 function openAdminDetail(id){
   const c=getContract(id);if(!c)return;stopHistoryListener();stopIssuesListener();prewarmContractHistory(id);
   const p=contractProgress(c),ds=dueState(c);
-  document.getElementById('detailTitle').textContent=c.customerName;document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[c.status]}`;
+  document.getElementById('detailTitle').textContent=c.customerName;document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[effectiveContractStatus(c)]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-<div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[c.status]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
-<div class="detail-toolbar"><button class="secondary" data-detail-edit="${c.id}">ویرایش اطلاعات قرارداد</button><button class="secondary" data-status-change="${c.id}">تغییر وضعیت</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
+<div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
+<div class="detail-toolbar"><button class="secondary" data-detail-edit="${c.id}">ویرایش اطلاعات قرارداد</button><button class="status-change-btn" data-status-change="${c.id}">تغییر وضعیت قرارداد</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
 <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
 <section class="panel detail-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">جمع وزن‌ها: ۱۰۰٪</span></div><div class="activity-add"><input id="activitySearch" placeholder="جستجو در کتابخانه؛ مثلاً سقف" autocomplete="off"><button class="primary" id="addSelectedActivity" disabled>+ اضافه کردن</button><div id="activitySuggestions" class="suggestions" style="display:none"></div></div><div class="activity-table" id="activityRows">${sorted.length?sorted.map(a=>activityRow(c,a)).join(''):'<div class="empty">هنوز فعالیتی برای این قرارداد تعریف نشده.</div>'}</div></section>
 ${issuesSectionHtml(c.id)}
@@ -1292,7 +1364,61 @@ function wireDetail(c){
 }
 function editContractActivity(c,id){const a=c.activities.find(x=>x.id===id);showPrompt('ویرایش نام فعالیت',`<form id="editActForm"><label>نام فعالیت<input id="editActName" value="${escapeHtml(a.name)}" required></label><div class="form-actions" style="margin-top:12px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);document.getElementById('editActForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;a.name=document.getElementById('editActName').value.trim();try{await persistContract(c);writeAuditLog('ویرایش فعالیت قرارداد',`نام فعالیت قرارداد به «${a.name}» تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityName:a.name,kind:'activityEdit'});closeModal('promptModal');openDetail(c.id)}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
 function deleteContractActivity(c,id){const a=c.activities.find(x=>x.id===id);const currentProgress=effectiveActivityProgress(c,a);const msg=currentProgress>0?`این فعالیت دارای ${toFa(currentProgress)}٪ پیشرفت ثبت‌شده است. مطمئن هستید؟`:'این فعالیت حذف شود؟';showPrompt('حذف فعالیت',`<div class="danger-note"><strong>${escapeHtml(a.name)}</strong><br>${msg}</div><div class="form-actions" style="margin-top:14px"><button class="secondary" data-close-prompt>لغو</button><button class="danger" id="confirmDeleteActivity">حذف فعالیت</button></div>`);document.getElementById('confirmDeleteActivity').onclick=async()=>{const btn=document.getElementById('confirmDeleteActivity');btn.disabled=true;c.activities=c.activities.filter(x=>x.id!==id);if(c.progressByActivity)delete c.progressByActivity[id];try{await persistContract(c);writeAuditLog('حذف فعالیت',`فعالیت «${a.name||''}» از قرارداد حذف شد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityName:a.name||'',kind:'activityDelete'});closeModal('promptModal');openDetail(c.id);toast('فعالیت حذف شد')}catch(err){toast(firestoreErrorMessage(err));btn.disabled=false}}}
-function openStatusPrompt(c){showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="active">فعال</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option>${c.status==='completed'?'<option value="completed">خاتمه‌یافته</option>':''}</select></label><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" placeholder="۱۴۰۵/۰۷/۰۱"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره</button></div></form>`);const sel=document.getElementById('newStatus');sel.value=c.status==='completed'?'completed':c.status;const rw=document.getElementById('reasonWrap');const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';sel.onchange=toggle;toggle();document.getElementById('statusForm').onsubmit=async e=>{e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;if(['stopped','terminated'].includes(sel.value)){const r=document.getElementById('statusReason').value.trim(),d=normalizeDate(document.getElementById('statusDate').value);if(!r||!d){if(btn)btn.disabled=false;return toast('علت و تاریخ الزامی است')}c.statusReason=r;c.statusDate=d}else{c.statusReason='';c.statusDate=''}c.status=sel.value;try{await updateContractRemote(c.id,c);writeAuditLog('تغییر وضعیت قرارداد',`وضعیت قرارداد «${c.customerName||''}» به «${statusLabels[c.status]||c.status}» تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',kind:'contractStatus'});closeModal('promptModal');openDetail(c.id);renderAll()}catch(err){toast(firestoreErrorMessage(err));if(btn)btn.disabled=false}}}
+function updateContractStatusRemote(c,nextStatus,reason='',statusDate=''){
+  if(!db||!currentAdmin||!(isAdminRole()||isSiteSupervisor()))throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
+  const previous={status:c.status,statusReason:c.statusReason||'',statusDate:c.statusDate||'',completedAt:c.completedAt||null};
+  const resolved=nextStatus==='resume'?automaticContractStatus(c):nextStatus;
+  if(resolved==='completed'&&!allContractActivitiesDone(c))throw new Error('completed-requires-100');
+  c.status=resolved;
+  c.statusReason=['stopped','terminated'].includes(resolved)?String(reason||''):'';
+  c.statusDate=['stopped','terminated'].includes(resolved)?String(statusDate||''):'';
+  c.completedAt=resolved==='completed'?(c.completedAt||new Date().toISOString()):null;
+  scheduleContractViewsRender();
+  const ref=db.collection(CONTRACT_COLLECTION).doc(c.id);
+  const patch={status:c.status,statusReason:c.statusReason,statusDate:c.statusDate,completedAt:c.completedAt,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION};
+  const pending=ref.set(patch,{merge:true});
+  pending.catch(err=>{
+    c.status=previous.status;c.statusReason=previous.statusReason;c.statusDate=previous.statusDate;c.completedAt=previous.completedAt;
+    scheduleContractViewsRender();
+    toast(`تغییر وضعیت ذخیره نشد: ${firestoreErrorMessage(err)}`);
+  });
+  return {resolved,pending};
+}
+function openStatusPrompt(c){
+  const current=effectiveContractStatus(c);
+  if(current==='completed'){
+    showPrompt('وضعیت قرارداد',`<div class="status-auto-note"><strong>خاتمه‌یافته</strong><p>این وضعیت فقط به‌صورت خودکار و زمانی ثبت می‌شود که همه فعالیت‌های قرارداد ۱۰۰٪ باشند. برای تغییر وضعیت، ابتدا درصد یکی از فعالیت‌ها باید کمتر از ۱۰۰٪ شود.</p></div><div class="form-actions" style="margin-top:14px"><button type="button" class="primary" data-close-prompt>بستن</button></div>`);
+    return;
+  }
+  const auto=automaticContractStatus(c);
+  const currentManual=['stopped','terminated'].includes(current);
+  const autoLabel=statusLabels[auto];
+  showPrompt('تغییر وضعیت قرارداد',`<form id="statusForm"><label>وضعیت<select id="newStatus"><option value="resume">${currentManual?`ادامه قرارداد — ${autoLabel}`:`${autoLabel} — خودکار`}</option><option value="stopped">متوقف</option><option value="terminated">فسخ‌شده</option></select></label><div class="status-auto-hint">«در انتظار شروع»، «در حال انجام» و «خاتمه‌یافته» بر اساس درصد فعالیت‌ها به‌صورت خودکار تعیین می‌شوند.</div><div id="reasonWrap" class="reason-box" style="display:none"><label>علت<input id="statusReason" value="${escapeHtml(c.statusReason||'')}"></label><label style="display:block;margin-top:8px">تاریخ<input id="statusDate" inputmode="numeric" maxlength="10" placeholder="مثلاً ۱۴۰۵۰۷۰۱" value="${escapeHtml(c.statusDate||'')}"></label></div><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ذخیره وضعیت</button></div></form>`);
+  const sel=document.getElementById('newStatus');
+  sel.value=currentManual?current:'resume';
+  const rw=document.getElementById('reasonWrap');
+  const dateInput=document.getElementById('statusDate');
+  if(dateInput)dateInput.addEventListener('input',()=>{dateInput.value=formatJalaliDateTyping(dateInput.value)});
+  const toggle=()=>rw.style.display=['stopped','terminated'].includes(sel.value)?'block':'none';
+  sel.onchange=toggle;toggle();
+  document.getElementById('statusForm').onsubmit=e=>{
+    e.preventDefault();const btn=e.submitter;if(btn)btn.disabled=true;
+    let reason='',date='';
+    if(['stopped','terminated'].includes(sel.value)){
+      reason=document.getElementById('statusReason').value.trim();date=normalizeDate(document.getElementById('statusDate').value);
+      if(!reason||!date){if(btn)btn.disabled=false;return toast('علت و تاریخ الزامی است')}
+    }
+    try{
+      const before=current;
+      const result=updateContractStatusRemote(c,sel.value,reason,date);
+      writeAuditLog('تغییر وضعیت قرارداد',`وضعیت قرارداد «${c.customerName||''}» از «${statusLabels[before]||before}» به «${statusLabels[result.resolved]||result.resolved}» تغییر کرد.`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',oldStatus:before,newStatus:result.resolved,kind:'contractStatus'});
+      closeModal('promptModal');openDetail(c.id);renderAll();toast(navigator.onLine?'وضعیت ثبت شد':'وضعیت ذخیره شد؛ پس از اتصال همگام می‌شود');
+    }catch(err){
+      if(String(err?.message||'')==='completed-requires-100')toast('خاتمه‌یافته فقط با ۱۰۰٪ شدن همه فعالیت‌ها ثبت می‌شود');else toast(firestoreErrorMessage(err));
+      if(btn)btn.disabled=false;
+    }
+  };
+}
 function showPrompt(title,html){document.getElementById('promptTitle').textContent=title;document.getElementById('promptBody').innerHTML=html;openModal('promptModal');document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'))}
 
 function libraryPrompt(cat=null,act=null){
@@ -1496,17 +1622,17 @@ function openBackupModal(){addSystemLog('باز کردن پشتیبان‌گیر
 }
 
 function systemLogSummaryRows(){
-  const active=activeContracts();
+  const unfinished=unfinishedProjectContracts();
   const totalActivities=state.library.reduce((sum,cat)=>sum+(cat.items?.length||0),0);
   const rows=[
     ['نسخه اپ',APP_VERSION],
     ['نقش',roleFa(currentRole())],
     ['کاربر فعلی',currentAdmin?.email||currentUserProfile?.email||'—'],
     ['قراردادها',toFa(state.contracts.length)],
-    ['قراردادهای فعال',toFa(active.length)],
-    ['تم',currentTheme()==='dark'?'Dark':'Light'],
-    ['وضعیت شبکه',navigator.onLine?'Online':'Offline'],
-    ['حالت نصب',isStandaloneMode()?'Installed PWA':'Browser'],
+    ['قراردادهای خاتمه‌نیافته',toFa(unfinished.length)],
+    ['تم',currentTheme()==='dark'?'تیره':'روشن'],
+    ['وضعیت شبکه',navigator.onLine?'آنلاین':'آفلاین'],
+    ['حالت اجرا',isStandaloneMode()?'نصب‌شده':'مرورگر'],
     ['آخرین بروزرسانی لاگ',systemLogs[0]?systemLogTime(systemLogs[0].time):'—']
   ];
   if(isAdminRole())rows.splice(5,0,['دسته‌های کتابخانه',toFa(state.library.length)],['فعالیت‌های کتابخانه',toFa(totalActivities)]);
@@ -1534,7 +1660,7 @@ function openPanelsModal(){if(!isAdminRole())return;openModal('panelsModal')}
 function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=role==='siteSupervisor'?'siteSupervisor':'';configureRoleUi();closeModal('panelsModal');switchView('home');renderAll()}
 function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
-document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');if(kpi.dataset.kpi==='active')filterStatus.value='active';if(kpi.dataset.kpi==='near'||kpi.dataset.kpi==='critical'){filterStatus.value='active';}renderContracts()}});
+document.addEventListener('click',e=>{const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}const kpi=e.target.closest('[data-kpi]');if(kpi){switchView('contracts');filterStatus.value=kpi.dataset.kpi==='completed'?'completed':'';renderContracts()}});
 document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole())openContractForm()};
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
 bindJalaliDateInputs();
@@ -1591,7 +1717,7 @@ document.getElementById('contractForm').onsubmit=async e=>{
   }
 }
 
-['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(id==='filterMonth'?'change':'input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
+['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(['filterMonth','filterStatus'].includes(id)?'change':'input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
   document.getElementById('catForm').onsubmit=async e=>{

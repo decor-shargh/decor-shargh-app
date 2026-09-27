@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v15-3-20260928-contract-save-sort-fix';
+const CACHE_NAME = 'decor-shargh-v15-5-20260928-progress-due-badges';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=153',
-  './app.js?v=153',
-  './manifest.webmanifest?v=153',
-  './brand-ui.webp?v=153',
-  './icon-192.png?v=153',
-  './icon-512.png?v=153',
-  './apple-touch-icon.png?v=153',
+  './styles.css?v=155',
+  './app.js?v=155',
+  './manifest.webmanifest?v=155',
+  './brand-ui.webp?v=155',
+  './icon-192.png?v=155',
+  './icon-512.png?v=155',
+  './apple-touch-icon.png?v=155',
   './version.json'
 ];
 
