@@ -87,3 +87,44 @@
 .pending-card{text-align:center}.pending-card h2{margin:3px 0 9px;font-size:24px}.pending-email{direction:ltr;color:#475467;font-size:13px;margin:0 0 15px}.pending-badge{display:inline-flex;background:#fff5df;color:#9a620c;border:1px solid #f4d298;border-radius:999px;padding:8px 14px;font-size:12px;font-weight:800}.pending-steps{display:flex;align-items:center;justify-content:center;gap:9px;flex-wrap:wrap;margin:24px 0 14px;font-size:11px;color:#9ca3af}.pending-steps .done{color:#15803d;font-weight:800}.pending-steps .current{color:#a16207;font-weight:800}.pending-copy{line-height:1.9;margin-bottom:18px}
 .backup-card{width:min(94%,720px)}.backup-actions-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.backup-action-box{border:1px solid var(--line);border-radius:15px;padding:15px;background:#fbfcfd}.backup-action-box h4{margin:0 0 7px}.backup-action-box p{font-size:12px;color:var(--muted);line-height:1.8;min-height:65px}.backup-action-box button{width:100%}.backup-action-box.danger-zone{background:#fffaf7;border-color:#f6d6c2}.restore-preview{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}.restore-counts{display:grid;gap:6px;margin:12px 0}.restore-count-row{display:flex;justify-content:space-between;background:#f8fafc;padding:8px 10px;border-radius:9px;font-size:12px;direction:ltr}.restore-count-row strong{direction:rtl}
 @media(max-width:560px){.auth-gate{padding:16px 12px}.login-reference-card,.pending-card{padding:22px 20px;border-radius:24px}.login-heading h1{font-size:25px}.brand-login-logo{width:138px}.remember-row{align-items:center}.admin-memory-note{font-size:8.5px;max-width:145px}.backup-actions-grid{grid-template-columns:1fr}.backup-action-box p{min-height:0}.top-brand>img{width:40px;height:40px}}
+
+/* v9 UX polish: white splash, non-sticky header, theme, auth fixes, users */
+.topbar{position:static;top:auto;background:var(--panel);backdrop-filter:none;border-bottom:1px solid var(--line)}
+.boot-splash{background:#fff;color:#173126}
+.boot-text{color:#6b7280}
+.boot-loader span{background:#b97d1f}
+.boot-logo{background:#fff!important;box-shadow:0 16px 36px rgba(6,59,44,.10)}
+.password-wrap{grid-template-columns:minmax(0,1fr) 42px 46px}
+.password-wrap input{grid-column:1;grid-row:1;padding-left:12px!important}
+.password-wrap .password-toggle{position:static;grid-column:2;grid-row:1;transform:none;width:42px;height:54px;border:0;border-right:1px solid #e0e0de;background:#f7f8f6;color:#667085;display:grid;place-items:center;cursor:pointer}
+.password-toggle svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8}
+.password-wrap .auth-input-icon{grid-column:3;grid-row:1}
+.theme-toggle-btn{width:42px;min-width:42px;height:42px;border-radius:12px;padding:0;display:grid;place-items:center;font-size:20px}
+.users-card{width:min(94%,780px)}
+.users-admin-list{display:grid;gap:10px}
+.user-access-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--panel)}
+.user-access-main{min-width:0}.user-access-email{font-weight:800;direction:ltr;text-align:right;overflow-wrap:anywhere}.user-access-meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:7px}.user-role-pill,.user-state-pill{font-size:11px;padding:5px 8px;border-radius:999px;background:#f3f4f6;color:#475467}.user-state-pill.pending{background:#fff7ed;color:#b45309}.user-state-pill.active{background:#ecfdf3;color:#047857}.user-state-pill.blocked{background:#fef2f2;color:#b91c1c}.user-access-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.user-access-actions button{white-space:nowrap}
+.role-soon-card{max-width:480px}
+
+:root[data-theme="dark"]{--bg:#0f1512;--panel:#17201c;--text:#edf4f0;--muted:#9aa9a1;--line:#2b3832;--primary:#b9852d;--primary2:#ca9846;--shadow:0 10px 30px rgba(0,0,0,.28)}
+:root[data-theme="dark"] body{background:var(--bg);color:var(--text)}
+:root[data-theme="dark"] .topbar,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .contract-card,:root[data-theme="dark"] .category-card,:root[data-theme="dark"] .modal-card,:root[data-theme="dark"] .menu-row,:root[data-theme="dark"] .user-access-row{background:var(--panel);color:var(--text)}
+:root[data-theme="dark"] .contract-card,:root[data-theme="dark"] .panel,:root[data-theme="dark"] .category-card,:root[data-theme="dark"] .modal-card,:root[data-theme="dark"] .user-access-row{border-color:var(--line)}
+:root[data-theme="dark"] input,:root[data-theme="dark"] select,:root[data-theme="dark"] textarea{background:#111915;color:var(--text);border-color:#33413a}
+:root[data-theme="dark"] .secondary,:root[data-theme="dark"] .icon-btn{background:#25302b;color:#edf4f0}
+:root[data-theme="dark"] .bottom-nav{background:rgba(23,32,28,.96);border-color:var(--line)}
+:root[data-theme="dark"] .nav-item{color:#9aa9a1}:root[data-theme="dark"] .nav-item.active{background:#25302b;color:#fff}
+:root[data-theme="dark"] .summary-box,:root[data-theme="dark"] .score-pill,:root[data-theme="dark"] .act-chip,:root[data-theme="dark"] .empty{background:#111915;border-color:#2b3832;color:var(--text)}
+:root[data-theme="dark"] .attention-item:hover,:root[data-theme="dark"] .suggestion:hover{background:#202b26}
+:root[data-theme="dark"] .donut-center{background:var(--panel)}
+:root[data-theme="dark"] .suggestions{background:var(--panel);border-color:var(--line)}
+:root[data-theme="dark"] .library-activity,:root[data-theme="dark"] .legend-row{border-color:#2b3832}
+:root[data-theme="dark"] .auth-gate{background:linear-gradient(135deg,#0f1512,#17201c 55%,#0f1512)}
+:root[data-theme="dark"] .login-reference-card,:root[data-theme="dark"] .pending-card{background:#17201c;border-color:#33413a}
+:root[data-theme="dark"] .login-heading h1{color:#f3f7f5}
+:root[data-theme="dark"] .auth-input-wrap,:root[data-theme="dark"] .auth-input-wrap input{background:#111915;color:#edf4f0;border-color:#33413a}
+:root[data-theme="dark"] .auth-input-icon,:root[data-theme="dark"] .password-wrap .password-toggle{background:#202b26;border-color:#33413a;color:#b9c6bf}
+:root[data-theme="dark"] .signup-secondary{background:#25302b;border-color:#33413a;color:#edf4f0}
+:root[data-theme="dark"] .boot-splash{background:#fff;color:#173126}
+
+@media(max-width:560px){.user-access-row{grid-template-columns:1fr}.user-access-actions{justify-content:stretch}.user-access-actions button{flex:1}.top-actions{gap:6px}.theme-toggle-btn{width:38px;min-width:38px;height:38px}}

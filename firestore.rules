@@ -15,22 +15,21 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
+      // هر کاربر فقط پروفایل خودش را می‌بیند؛ ادمین همه کاربران را می‌بیند.
       allow read: if isAdmin() || (signedIn() && request.auth.uid == userId);
 
-      // ساخت حساب جدید: کاربر فقط می‌تواند پروفایل خودش را در حالت pending بسازد.
+      // ثبت نام جدید: فقط ساخت پروفایل شخصی با نقش pending و دسترسی غیرفعال.
       allow create: if signedIn()
         && request.auth.uid == userId
         && request.resource.data.role == "pending"
         && request.resource.data.active == false
-        && request.resource.data.email == request.auth.token.email
-        && request.resource.data.keys().hasOnly([
-          "email", "name", "role", "active", "requestedAt", "createdAt"
-        ]);
+        && request.resource.data.email == request.auth.token.email;
 
-      // تغییر نقش/فعال‌سازی فقط توسط ادمین.
+      // نقش، فعال‌سازی و مسدودسازی فقط توسط ادمین تغییر می‌کند.
       allow update, delete: if isAdmin();
     }
 
+    // اطلاعات کاری اپ فقط برای Admin فعال این نسخه قابل دسترسی است.
     match /{document=**} {
       allow read, write: if isAdmin();
     }

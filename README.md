@@ -1,20 +1,15 @@
-# دکوراسیون شرق — Admin V8
+# دکوراسیون شرق — Admin V9
 
-نسخه V8 شامل:
-- لوگوی رسمی جدید دکوراسیون شرق در Login، Splash، Header و آیکون PWA
-- Login مشابه Afrachoob Control Center
-- Email/Password Firebase Authentication
-- نمایش/مخفی‌سازی رمز
-- Remember Me مشابه افراچوب: برای کاربران غیرادمین رمز به‌صورت رمزگذاری‌شده روی همان دستگاه نگهداری می‌شود؛ برای Admin ذخیره نمی‌شود
-- ساخت حساب جدید با Firebase Auth و پروفایل `users/{uid}` در حالت `pending`
-- صفحه انتظار تأیید مدیر برای حساب‌های جدید
-- Session پایدار و بدون flash صفحه Login هنگام Refresh
-- قراردادها و کتابخانه فعالیت‌ها روی Firestore
-- PWA و نصب اپ
-- Backup JSON از Firestore و Restore امن با بکاپ اضطراری قبل از بازیابی
+تغییرات V9:
+- لوگوی نهایی کاربر در Login، Header، Splash و آیکون PWA استفاده شده است.
+- جای دکمه نمایش/مخفی‌سازی رمز اصلاح شده است.
+- ساخت حساب جدید با وضعیت pending و منطق تأیید مدیر پایدار شده است.
+- بخش کاربران و دسترسی‌ها برای Admin اضافه شده است.
+- Splash سفید شده است.
+- Header دیگر sticky نیست.
+- دکمه «+ قرارداد جدید» فقط در صفحه قراردادها نمایش داده می‌شود.
+- خروج نیازمند تأیید کاربر است.
+- حالت روشن/تیره با ذخیره تنظیم روی دستگاه اضافه شده است.
+- بکاپ/بازیابی V8، Firestore، PWA و همگام‌سازی قراردادها حفظ شده‌اند.
 
-## فایل مهم Rules
-برای کارکرد «ساخت حساب جدید» باید محتوای `firestore.rules` در Firebase > Firestore > Rules قرار داده و Publish شود.
-
-## نکته Backup
-Backup شامل Firestore است و رمز عبور Firebase Authentication را ذخیره نمی‌کند.
+قبل از تست ساخت حساب، `firestore.rules` این نسخه را در Firebase > Firestore > Rules جایگزین و Publish کنید.
