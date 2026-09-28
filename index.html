@@ -4,22 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffffff" />
-  <meta name="app-version" content="16.0.0" />
+  <meta name="app-version" content="16.2.0" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Decor Shargh" />
   <title>Decor Shargh | Admin Panel</title>
-  <link rel="manifest" href="manifest.webmanifest?v=160" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=160" />
-  <link rel="icon" href="icon-192.png?v=160" />
+  <link rel="manifest" href="manifest.webmanifest?v=162" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=162" />
+  <link rel="icon" href="icon-192.png?v=162" />
   <script>try{const t=localStorage.getItem('decorSharghTheme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css?v=160" />
+  <link rel="stylesheet" href="styles.css?v=162" />
 </head>
 <body>
   <section id="bootSplash" class="boot-splash" aria-live="polite">
     <div class="boot-brand">
-      <div class="boot-logo"><img src="brand-ui.webp?v=160" alt="Decor Shargh"></div>
+      <div class="boot-logo"><img src="brand-ui.webp?v=162" alt="Decor Shargh"></div>
       <div class="boot-name">Decor Shargh</div>
       <div class="boot-loader" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="boot-text">در حال آماده‌سازی...</div>
@@ -29,7 +29,7 @@
   <section id="installPrompt" class="install-sheet is-hidden" aria-hidden="true">
     <div class="install-backdrop" data-install-dismiss></div>
     <div class="install-card">
-      <div class="install-icon"><img src="brand-ui.webp?v=160" alt="Decor Shargh"></div>
+      <div class="install-icon"><img src="brand-ui.webp?v=162" alt="Decor Shargh"></div>
       <div class="install-copy">
         <h3>Install Decor Shargh</h3>
         <p id="installText">برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.</p>
@@ -47,7 +47,7 @@
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card login-reference-card">
       <div class="login-logo-wrap">
-        <img class="brand-login-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق">
+        <img class="brand-login-logo" src="brand-ui.webp?v=162" alt="لوگوی دکوراسیون شرق">
       </div>
       <div class="login-heading">
         <h1>Decor Shargh Control Center</h1>
@@ -77,7 +77,7 @@
     <div class="auth-decor auth-decor-one"></div>
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=162" alt="لوگوی دکوراسیون شرق"></div>
       <h2>در انتظار تأیید حساب</h2>
       <p id="pendingEmail" class="pending-email"></p>
       <div class="pending-badge">در انتظار تأیید مدیر</div>
@@ -89,7 +89,7 @@
 
   <section id="blockedGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=162" alt="لوگوی دکوراسیون شرق"></div>
       <h2>دسترسی لغو شده</h2>
       <p class="muted">این حساب در حال حاضر اجازه ورود به سامانه را ندارد.</p>
       <button id="blockedLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -98,7 +98,7 @@
 
   <section id="roleGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=162" alt="لوگوی دکوراسیون شرق"></div>
       <h2 id="roleGateTitle">دسترسی تأیید شد</h2>
       <p id="roleGateCopy" class="muted pending-copy">پنل این نقش هنوز در حال آماده‌سازی است.</p>
       <button id="roleGateLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -108,7 +108,7 @@
   <div class="app-shell is-hidden" id="appShell">
     <header class="topbar">
       <div class="top-brand">
-        <img src="brand-ui.webp?v=160" alt="Decor Shargh logo">
+        <img src="brand-ui.webp?v=162" alt="Decor Shargh logo">
         <div class="brand-copy">
           <h1>Decor Shargh</h1>
         </div>
@@ -201,9 +201,15 @@
 
       <section class="view" data-view="financial">
         <div class="section-head sticky-title"><h2>گزارش مالی</h2></div>
-        <section class="panel period-filter-panel">
-          <div class="section-head"><div><h3>فیلتر دوره</h3><p class="muted small">مبنای فیلتر، تاریخ عقد قرارداد است. اگر هیچ ماهی انتخاب نشود، همه قراردادها محاسبه می‌شوند.</p></div><div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="financial">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="financial">نمایش همه</button></div></div>
-          <div id="financialPeriodPicker" class="period-picker"></div>
+        <section class="panel period-filter-panel compact-period-filter" data-period-panel="financial">
+          <div class="period-filter-head">
+            <div><h3>فیلتر دوره</h3><p class="muted small">بر اساس تاریخ عقد قرارداد</p></div>
+            <button type="button" class="secondary period-filter-toggle" data-period-toggle="financial" aria-expanded="false">باز کردن فیلتر</button>
+          </div>
+          <div id="financialPeriodBody" class="period-filter-body is-collapsed">
+            <div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="financial">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="financial">نمایش همه</button></div>
+            <div id="financialPeriodPicker" class="period-picker"></div>
+          </div>
         </section>
         <div id="financialKpis" class="financial-kpi-grid"></div>
         <section class="panel">
@@ -214,9 +220,15 @@
 
       <section class="view" data-view="outputs">
         <div class="section-head sticky-title"><h2>خروجی</h2></div>
-        <section class="panel period-filter-panel">
-          <div class="section-head"><div><h3>انتخاب ماه‌ها</h3><p class="muted small">مبنای انتخاب، تاریخ عقد قرارداد است. می‌توانید از چند سال، ماه‌های دلخواه را انتخاب کنید.</p></div><div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="output">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="output">نمایش همه</button></div></div>
-          <div id="outputPeriodPicker" class="period-picker"></div>
+        <section class="panel period-filter-panel compact-period-filter" data-period-panel="output">
+          <div class="period-filter-head">
+            <div><h3>فیلتر خروجی</h3><p class="muted small">انتخاب چند ماه از چند سال بر اساس تاریخ عقد</p></div>
+            <button type="button" class="secondary period-filter-toggle" data-period-toggle="output" aria-expanded="false">باز کردن فیلتر</button>
+          </div>
+          <div id="outputPeriodBody" class="period-filter-body is-collapsed">
+            <div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="output">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="output">نمایش همه</button></div>
+            <div id="outputPeriodPicker" class="period-picker"></div>
+          </div>
         </section>
         <section class="panel output-menu-panel">
           <div class="output-report-grid">
@@ -418,6 +430,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js?v=160"></script>
+  <script src="app.js?v=162"></script>
 </body>
 </html>

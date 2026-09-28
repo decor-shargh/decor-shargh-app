@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="16.0.0";
+const APP_VERSION="16.2.0";
 
 let auth=null;
 let db=null;
@@ -491,6 +491,7 @@ let profileAccessSignature='';
 let auditLogUnsub=null;
 let auditLogCache=[];
 let managerPrioritySelection='';
+let dashboardKpiFilter='';
 let financialPeriodSelection=new Set();
 let outputPeriodSelection=new Set();
 let currentReportType='';
@@ -1118,12 +1119,28 @@ function renderCharts(unfinished){
   document.getElementById('statusLegend').innerHTML=labels.map((x,i)=>`<div class="legend-row"><span><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${colors[i]};margin-left:7px"></span>${x[0]}</span><strong>${toFa(x[1])}</strong></div>`).join('');
 }
 
+function contractMatchesDashboardKpi(c,key){
+  if(!key||key==='total')return true;
+  if(key==='pendingStart')return effectiveContractStatus(c)==='pendingStart';
+  if(key==='completed')return effectiveContractStatus(c)==='completed';
+  if(key==='stopped')return effectiveContractStatus(c)==='stopped';
+  if(key==='near')return dueState(c).key==='near';
+  if(key==='critical')return ['critical','overdue'].includes(dueState(c).key);
+  if(key==='progress')return ['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c));
+  return true;
+}
+function clearVisibleContractFilters(){
+  const customer=document.getElementById('filterCustomer'),year=document.getElementById('filterYear'),month=document.getElementById('filterMonth'),status=document.getElementById('filterStatus');
+  if(customer)customer.value='';if(year)year.value='';if(month)month.value='';if(status)status.value='';
+}
+
 function renderContracts(){
   let arr=[...state.contracts].sort(contractListSort);
   const name=document.getElementById('filterCustomer').value.trim();
   const year=normalizeYear(document.getElementById('filterYear').value);
   const month=document.getElementById('filterMonth').value;
   const st=document.getElementById('filterStatus').value;
+  if(dashboardKpiFilter)arr=arr.filter(c=>contractMatchesDashboardKpi(c,dashboardKpiFilter));
   if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));
   if(st)arr=arr.filter(c=>effectiveContractStatus(c)===st);
   if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));
@@ -1136,6 +1153,16 @@ const persianMonths=['فروردین','اردیبهشت','خرداد','تیر','
 function contractAmountNumber(c){return Number(toEn(c?.amount??'').replace(/,/g,''))||0}
 function availableContractYears(){
   return [...new Set(state.contracts.map(c=>normalizeDate(c.contractDate).split('/')[0]).filter(y=>/^\d{4}$/.test(y)))].sort((a,b)=>Number(b)-Number(a));
+}
+
+function togglePeriodFilter(target){
+  const body=document.getElementById(target==='financial'?'financialPeriodBody':'outputPeriodBody');
+  const btn=document.querySelector(`[data-period-toggle="${target}"]`);
+  if(!body||!btn)return;
+  const opening=body.classList.contains('is-collapsed');
+  body.classList.toggle('is-collapsed',!opening);
+  btn.setAttribute('aria-expanded',opening?'true':'false');
+  btn.textContent=opening?'بستن فیلتر':'باز کردن فیلتر';
 }
 function periodSelectionFor(target){return target==='financial'?financialPeriodSelection:outputPeriodSelection}
 function allPeriodKeys(){return availableContractYears().flatMap(y=>persianMonths.map((_,i)=>`${y}-${String(i+1).padStart(2,'0')}`))}
@@ -1925,11 +1952,11 @@ function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=['siteSu
 function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
 document.addEventListener('click',e=>{
-  const nav=e.target.closest('[data-nav]');if(nav)switchView(nav.dataset.nav);
-  const go=e.target.closest('[data-go]');if(go)switchView(go.dataset.go);
+  const nav=e.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='contracts')dashboardKpiFilter='';switchView(nav.dataset.nav);}
+  const go=e.target.closest('[data-go]');if(go){if(go.dataset.go==='contracts')dashboardKpiFilter='';switchView(go.dataset.go);}
   const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);
   const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}
-  const kpi=e.target.closest('[data-kpi]');if(kpi){const map={completed:'completed',pendingStart:'pendingStart',stopped:'stopped'};switchView('contracts');filterStatus.value=map[kpi.dataset.kpi]||'';renderContracts()}
+  const kpi=e.target.closest('[data-kpi]');if(kpi){dashboardKpiFilter=kpi.dataset.kpi||'';clearVisibleContractFilters();switchView('contracts');renderContracts()}
   const priority=e.target.closest('[data-manager-priority]');if(priority&&isProjectManagerUi()){managerPrioritySelection=managerPrioritySelection===priority.dataset.managerPriority?'':priority.dataset.managerPriority;renderManagerPriorityList()}
   const report=e.target.closest('[data-report-type]');if(report&&isProjectManagerUi())openReportPreview(report.dataset.reportType);
 });
@@ -1989,7 +2016,7 @@ document.getElementById('contractForm').onsubmit=async e=>{
   }
 }
 
-['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(['filterMonth','filterStatus'].includes(id)?'change':'input',renderContracts));document.getElementById('clearFilters').onclick=()=>{filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
+['filterCustomer','filterYear','filterMonth','filterStatus'].forEach(id=>document.getElementById(id).addEventListener(['filterMonth','filterStatus'].includes(id)?'change':'input',()=>{dashboardKpiFilter='';renderContracts()}));document.getElementById('clearFilters').onclick=()=>{dashboardKpiFilter='';filterCustomer.value='';filterYear.value='';filterMonth.value='';filterStatus.value='';renderContracts()};
 document.getElementById('addCategoryBtn').onclick=()=>{
   showPrompt('دسته جدید',`<form id="catForm"><label>نام دسته<input id="catName" required></label><div class="form-actions" style="margin-top:14px"><button type="button" class="secondary" data-close-prompt>انصراف</button><button class="primary">ایجاد</button></div></form>`);
   document.getElementById('catForm').onsubmit=async e=>{
@@ -2103,6 +2130,7 @@ document.querySelectorAll('[data-preview-role]').forEach(b=>b.addEventListener('
 document.getElementById('exitPreviewBtn')?.addEventListener('click',exitPanelPreview);
 document.getElementById('downloadReportPdfBtn')?.addEventListener('click',downloadCurrentReportPdf);
 document.getElementById('sharePrintReportBtn')?.addEventListener('click',shareOrPrintCurrentReport);
+document.querySelectorAll('[data-period-toggle]').forEach(b=>b.addEventListener('click',()=>togglePeriodFilter(b.dataset.periodToggle)));
 document.querySelectorAll('[data-close-system-log]').forEach(b=>b.addEventListener('click',()=>closeModal('systemLogModal')));
 document.querySelectorAll('[data-close-backup]').forEach(b=>b.addEventListener('click',()=>closeModal('backupModal')));
 document.getElementById('downloadBackupBtn')?.addEventListener('click',async e=>{

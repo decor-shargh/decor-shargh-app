@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v16-20260928-project-manager-financial';
+const CACHE_NAME = 'decor-shargh-v16-2-20260928-kpi-filters';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=160',
-  './app.js?v=160',
-  './manifest.webmanifest?v=160',
-  './brand-ui.webp?v=160',
-  './icon-192.png?v=160',
-  './icon-512.png?v=160',
-  './apple-touch-icon.png?v=160',
+  './styles.css?v=162',
+  './app.js?v=162',
+  './manifest.webmanifest?v=162',
+  './brand-ui.webp?v=162',
+  './icon-192.png?v=162',
+  './icon-512.png?v=162',
+  './apple-touch-icon.png?v=162',
   './version.json'
 ];
 
