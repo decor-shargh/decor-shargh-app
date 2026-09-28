@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v15-7-20260928-reliable-supervisor-timing';
+const CACHE_NAME = 'decor-shargh-v15-8-20260928-stopped-attention';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=157',
-  './app.js?v=157',
-  './manifest.webmanifest?v=157',
-  './brand-ui.webp?v=157',
-  './icon-192.png?v=157',
-  './icon-512.png?v=157',
-  './apple-touch-icon.png?v=157',
+  './styles.css?v=158',
+  './app.js?v=158',
+  './manifest.webmanifest?v=158',
+  './brand-ui.webp?v=158',
+  './icon-192.png?v=158',
+  './icon-512.png?v=158',
+  './apple-touch-icon.png?v=158',
   './version.json'
 ];
 

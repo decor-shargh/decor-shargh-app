@@ -488,3 +488,8 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
   .bar-value-wrap>strong{font-size:9.5px}
   .bar-value-wrap>.progress-alert-tag{font-size:9px;padding:2px 4px}
 }
+
+/* V15.8 attention: stopped contracts are always visible with status + timing */
+.attention-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:48%;}
+.attention-badges .badge{white-space:nowrap;}
+@media(max-width:560px){.attention-badges{max-width:44%;gap:4px}.attention-item .stop-card-info{margin-top:5px}}

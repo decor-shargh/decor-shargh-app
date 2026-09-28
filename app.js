@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.7.0";
+const APP_VERSION="15.8.0";
 
 let auth=null;
 let db=null;
@@ -1019,12 +1019,16 @@ function renderHome(){
     ['میانگین پیشرفت',`${avg}٪`,'primaryTone','progress']
   ].map(([l,v,cl,key])=>`<div class="kpi ${cl}" data-kpi="${key}"><div class="label">${l}</div><div class="value">${toFa(v)}</div></div>`).join('');
 
-  const stopped=all.filter(c=>effectiveContractStatus(c)==='stopped');
-  const attention=[...critical,...stopped,...near]
-    .filter((c,i,a)=>a.findIndex(x=>x.id===c.id)===i)
-    .sort(contractEndSort);
+  const attention=all.filter(c=>{
+    const status=effectiveContractStatus(c),key=dueState(c).key;
+    return status==='stopped'||key==='near'||key==='critical'||key==='overdue';
+  }).sort(contractEndSort);
   document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';
-  document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{const ds=dueState(c);return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="attention-progress muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}<span>پیشرفت ${toFa(contractProgress(c))}٪</span></div></div><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>`}).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
+  document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{
+    const ds=dueState(c),stopped=effectiveContractStatus(c)==='stopped';
+    const statusBadge=stopped?'<span class="badge stopped">متوقف</span>':`<span class="badge ${ds.key}">${escapeHtml(ds.text)}</span>`;
+    return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="attention-progress muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}<span>پیشرفت ${toFa(contractProgress(c))}٪</span></div>${stopped?stoppedContractInfo(c):''}</div><div class="attention-badges">${statusBadge}${stopped?`<span class="badge ${ds.key}">${escapeHtml(ds.text)}</span>`:''}</div></div>`;
+  }).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
 
   renderCharts(unfinished);
 }
