@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.8.0";
+const APP_VERSION="15.9.0";
 
 let auth=null;
 let db=null;

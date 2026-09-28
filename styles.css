@@ -493,3 +493,58 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
 .attention-badges{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:48%;}
 .attention-badges .badge{white-space:nowrap;}
 @media(max-width:560px){.attention-badges{max-width:44%;gap:4px}.attention-item .stop-card-info{margin-top:5px}}
+
+/* V15.9 — attention cards: keep all timing/status text inside the card */
+.attention-item{
+  width:100%;
+  min-width:0;
+  overflow:hidden;
+}
+.attention-item>div:first-child{
+  min-width:0;
+  overflow:hidden;
+}
+.attention-badges{
+  min-width:0;
+}
+.attention-badges .badge{
+  max-width:100%;
+  overflow-wrap:anywhere;
+  word-break:normal;
+}
+@media(max-width:560px){
+  .attention-item{
+    display:grid;
+    grid-template-columns:minmax(0,1fr);
+    align-items:start;
+    gap:7px;
+    padding:10px 11px;
+  }
+  .attention-item>div:first-child{
+    width:100%;
+  }
+  .attention-badges{
+    width:100%;
+    max-width:none;
+    justify-content:flex-start;
+    gap:5px;
+    flex-wrap:wrap;
+  }
+  .attention-badges .badge{
+    white-space:normal;
+    width:auto;
+    max-width:100%;
+    text-align:right;
+    line-height:1.45;
+    padding:4px 7px;
+  }
+  .attention-item .stop-card-info{
+    width:100%;
+    max-width:100%;
+    margin:6px 0 0;
+  }
+  .attention-item .stop-card-info span{
+    min-width:0;
+    overflow-wrap:anywhere;
+  }
+}

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'decor-shargh-v15-8-20260928-stopped-attention';
+const CACHE_NAME = 'decor-shargh-v15-9-20260928-stopped-attention';
 const APP_SHELL = [
   './',
   './index.html',
