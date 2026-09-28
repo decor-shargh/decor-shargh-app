@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="15.6.0";
+const APP_VERSION="15.7.0";
 
 let auth=null;
 let db=null;
@@ -38,6 +38,7 @@ let authResolved=false;
 let deferredInstallPrompt=null;
 let installPromptShownThisSession=false;
 let installUiReady=false;
+const IOS_INSTALL_HINT_KEY='decorSharghIosInstallHintShownV1';
 
 function hideBootSplash(){
   const splash=document.getElementById('bootSplash');
@@ -68,8 +69,13 @@ function maybeShowInstallPrompt(){
     text.textContent='برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.';
     btn.textContent='نصب اپلیکیشن';
   }else if(isIosDevice()){
+    let alreadyShown=false;
+    try{alreadyShown=localStorage.getItem(IOS_INSTALL_HINT_KEY)==='1'||localStorage.getItem('decorSharghPwaInstalled')==='1'}catch{}
+    if(alreadyShown)return;
     text.textContent='در Safari روی دکمه Share بزن و «Add to Home Screen» را انتخاب کن.';
     btn.textContent='متوجه شدم';
+    // iOS does not reliably emit appinstalled. Showing the help once is enough.
+    try{localStorage.setItem(IOS_INSTALL_HINT_KEY,'1')}catch{}
   }else{
     return;
   }
@@ -826,24 +832,31 @@ async function updateActivityProgressRemote(c,activityId,newProgress,action='man
   c.progressByActivity={...previousMap,[activityId]:nextProgress};syncAutoCompleted(c);
   const nextEffectiveStatus=effectiveContractStatus(c);
   refreshProgressUi(c,activityId);
+
   const ref=db.collection(CONTRACT_COLLECTION).doc(c.id),historyRef=ref.collection('history').doc();
-  const batch=db.batch();
+  // Supervisor progress is derived from progressByActivity. Do not require a status-field write
+  // for every tap; this keeps old and new rules compatible and makes offline writes much safer.
   const patch={
     [`progressByActivity.${activityId}`]:nextProgress,
-    status:effectiveContractStatus(c),completedAt:c.completedAt||null,
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION
   };
-  batch.update(ref,patch);
-  batch.set(historyRef,{contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION});
-  const statusChangeText=previousEffectiveStatus!==nextEffectiveStatus?` وضعیت قرارداد از «${statusLabels[previousEffectiveStatus]||previousEffectiveStatus}» به «${statusLabels[nextEffectiveStatus]||nextEffectiveStatus}» تغییر کرد.`:'';
-  addAuditToBatch(batch,action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.${statusChangeText}`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,kind:action==='done'?'activityDone':'progress'});
-  const pending=batch.commit();
-  pending.catch(err=>{
-    if(String(err?.code||'').includes('permission-denied')){
-      c.progressByActivity=previousMap;c.status=previousStatus;c.completedAt=previousCompleted;refreshProgressUi(c,activityId);toast('ذخیره مجاز نشد؛ مقدار قبلی برگردانده شد.');
-    }
+  if(isAdminRole()){
+    patch.status=nextEffectiveStatus;
+    patch.completedAt=c.completedAt||null;
+  }
+
+  const primaryWrite=ref.update(patch);
+  primaryWrite.catch(err=>{
+    c.progressByActivity=previousMap;c.status=previousStatus;c.completedAt=previousCompleted;refreshProgressUi(c,activityId);
+    toast(firestoreErrorMessage(err));
   });
-  return {saved:c,changed:true,pending:true};
+
+  const historyData={contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION};
+  // Auxiliary logging must never block the actual progress save.
+  historyRef.set(historyData).catch(()=>{});
+  const statusChangeText=previousEffectiveStatus!==nextEffectiveStatus?` وضعیت قرارداد از «${statusLabels[previousEffectiveStatus]||previousEffectiveStatus}» به «${statusLabels[nextEffectiveStatus]||nextEffectiveStatus}» تغییر کرد.`:'';
+  writeAuditLog(action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.${statusChangeText}`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,kind:action==='done'?'activityDone':'progress'});
+  return {saved:c,changed:true,pending:true,promise:primaryWrite};
 }
 
 function toFa(v){return String(v).replace(/\d/g,d=>faDigits[d])}
@@ -896,7 +909,7 @@ function duePhrase(n,label){
 function dueState(c){
   const status=effectiveContractStatus(c);
   if(status==='completed')return {key:'completed',text:'خاتمه‌یافته'};
-  if(status==='stopped')return {key:'stopped',text:'متوقف'};
+  // A stopped contract still consumes contractual time. Keep original/revised due dates live.
   if(status==='terminated')return {key:'terminated',text:'فسخ‌شده'};
   const original=daysUntilDate(c.endDate);
   if(original===null)return {key:'normal',text:'بدون تاریخ معتبر'};
@@ -904,7 +917,7 @@ function dueState(c){
   let key='normal';
   // The original contractual due date remains the criticality baseline even when a
   // compensatory/revised date exists. Once the original due date is passed, the
-  // contract is critical until it is completed/stopped/terminated.
+  // contract is critical until it is completed/terminated. Stopped contracts keep aging.
   if(original<0)key='overdue';
   else if(original<=3)key='critical';
   else if(original<=7)key='near';
@@ -933,6 +946,8 @@ function allContractActivitiesDone(c){return !!c.activities?.length&&c.activitie
 function automaticContractStatus(c){if(allContractActivitiesDone(c))return 'completed';return hasAnyContractProgress(c)?'inProgress':'pendingStart'}
 function effectiveContractStatus(c){
   const raw=String(c?.status||'');
+  // Completion is never manual: when every activity reaches 100%, it wins automatically.
+  if(allContractActivitiesDone(c||{}))return 'completed';
   if(raw==='stopped'||raw==='terminated')return raw;
   // Legacy `active` contracts are interpreted from their real progress without a risky bulk migration.
   return automaticContractStatus(c||{});
@@ -949,6 +964,15 @@ function toast(msg){const el=document.getElementById('toast');el.textContent=msg
 
 function getContract(id){return state.contracts.find(c=>c.id===id)}
 function contractEndSort(a,b){const ad=jalaliToDate(a.endDate),bd=jalaliToDate(b.endDate);const at=ad?ad.getTime():Number.POSITIVE_INFINITY,bt=bd?bd.getTime():Number.POSITIVE_INFINITY;if(at!==bt)return at-bt;const ac=jalaliToDate(a.contractDate),bc=jalaliToDate(b.contractDate);return (bc?bc.getTime():0)-(ac?ac.getTime():0)}
+function contractListSort(a,b){const ac=effectiveContractStatus(a)==='completed',bc=effectiveContractStatus(b)==='completed';if(ac!==bc)return ac?1:-1;return contractEndSort(a,b)}
+function stoppedContractInfo(c){
+  if(effectiveContractStatus(c)!=='stopped')return '';
+  const reason=String(c.statusReason||'').trim()||'دلیل ثبت نشده';
+  const since=daysUntilDate(c.statusDate);
+  let duration='مدت توقف ثبت نشده';
+  if(since!==null){const days=Math.max(0,-since);duration=days===0?'امروز متوقف شده':`${toFa(days)} روز متوقف`;}
+  return `<div class="stop-card-info"><span><b>دلیل توقف:</b> ${escapeHtml(reason)}</span><span>${escapeHtml(duration)}</span></div>`;
+}
 function unfinishedProjectContracts(){return state.contracts.filter(c=>['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c))).sort(contractEndSort)}
 
 function contractIssueBadge(c){
@@ -959,6 +983,7 @@ function contractIssueBadge(c){
 function adminContractCard(c){const p=contractProgress(c),ds=dueState(c);const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ${toFa(effectiveActivityProgress(c,a))}٪</span>`).join('')||'<span class="muted small">هنوز فعالیتی تعریف نشده</span>';return `<article class="contract-card ${statusClass(c)}" data-open-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
 <div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge">${escapeHtml(statusLabels[effectiveContractStatus(c)]||'')}</span></div>
+${stoppedContractInfo(c)}
 ${contractIssueBadge(c)}
 <div class="progress-row"><span class="small">پیشرفت</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="activities-mini">${acts}</div>
@@ -968,6 +993,7 @@ ${contractIssueBadge(c)}
 function supervisorContractCard(c){const p=contractProgress(c),ds=dueState(c);return `<article class="contract-card supervisor-contract-card ${statusClass(c)}" data-open-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="supervisor-card-status">${escapeHtml(statusLabels[effectiveContractStatus(c)]||'')}</div></div>
 <div class="supervisor-contract-due badge ${ds.key}">${escapeHtml(ds.text)}</div>
+${stoppedContractInfo(c)}
 ${contractIssueBadge(c)}
 <div class="progress-row supervisor-progress-row"><span class="small">پیشرفت کل</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="supervisor-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>${optionalMoney(c.amount)}</span></div>
@@ -1028,7 +1054,7 @@ function renderCharts(unfinished){
 }
 
 function renderContracts(){
-  let arr=[...state.contracts].sort(contractEndSort);
+  let arr=[...state.contracts].sort(contractListSort);
   const name=document.getElementById('filterCustomer').value.trim();
   const year=normalizeYear(document.getElementById('filterYear').value);
   const month=document.getElementById('filterMonth').value;
@@ -1261,7 +1287,7 @@ function openSupervisorDetail(id){
   document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[effectiveContractStatus(c)]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-  <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
+  <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong class="timing-state ${ds.key}">${detailDueHtml(c,ds)}</strong></div></div>
   <div class="supervisor-detail-tools"><button class="status-change-btn" data-status-change="${c.id}">تغییر وضعیت قرارداد</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
   <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
   <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">درصد را وارد و «ثبت» را بزنید</span></div><div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی برای این قرارداد تعریف نشده است.</div>'}</div></section>
@@ -1272,8 +1298,22 @@ function openSupervisorDetail(id){
 
 function wireSupervisorDetail(c){
   document.querySelectorAll('[data-supervisor-progress]').forEach(inp=>{const selectAll=()=>window.setTimeout(()=>{try{inp.select()}catch{}},0);inp.addEventListener('focus',selectAll);inp.addEventListener('click',()=>{if(document.activeElement===inp)selectAll()});inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.querySelector(`[data-supervisor-save="${inp.dataset.supervisorProgress}"]`)?.click()}})});
-  document.querySelectorAll('[data-supervisor-save]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorSave,inp=document.querySelector(`[data-supervisor-progress="${id}"]`),a=(c.activities||[]).find(x=>x.id===id);if(!inp||!a)return;const value=Math.max(0,Math.min(100,Number(inp.value)||0));inp.value=value;const result=await updateActivityProgressRemote(c,id,value,'manual');if(result.changed){toast(navigator.onLine?'درصد ثبت شد':'درصد ذخیره شد؛ پس از اتصال همگام می‌شود')}else toast('درصد تغییری نکرده است')});
-  document.querySelectorAll('[data-supervisor-done]').forEach(btn=>btn.onclick=async()=>{const id=btn.dataset.supervisorDone;if(!(c.activities||[]).some(a=>a.id===id))return;const result=await updateActivityProgressRemote(c,id,100,'done');if(result.changed){toast(navigator.onLine?'فعالیت انجام شد':'انجام شد؛ پس از اتصال همگام می‌شود')}});
+  document.querySelectorAll('[data-supervisor-save]').forEach(btn=>btn.onclick=async()=>{
+    if(btn.dataset.busy==='1')return;btn.dataset.busy='1';btn.disabled=true;
+    try{
+      const id=btn.dataset.supervisorSave,inp=document.querySelector(`[data-supervisor-progress="${id}"]`),a=(c.activities||[]).find(x=>x.id===id);if(!inp||!a)return;
+      const value=Math.max(0,Math.min(100,Number(inp.value)||0));inp.value=value;
+      const result=await updateActivityProgressRemote(c,id,value,'manual');
+      if(result.changed)toast(navigator.onLine?'درصد ثبت شد':'درصد ذخیره شد؛ پس از اتصال همگام می‌شود');else toast('درصد تغییری نکرده است');
+    }catch(err){toast(firestoreErrorMessage(err))}finally{window.setTimeout(()=>{btn.disabled=false;btn.dataset.busy='0'},300)}
+  });
+  document.querySelectorAll('[data-supervisor-done]').forEach(btn=>btn.onclick=async()=>{
+    if(btn.dataset.busy==='1')return;btn.dataset.busy='1';btn.disabled=true;
+    try{
+      const id=btn.dataset.supervisorDone;if(!(c.activities||[]).some(a=>a.id===id))return;
+      const result=await updateActivityProgressRemote(c,id,100,'done');if(result.changed)toast(navigator.onLine?'فعالیت انجام شد':'انجام شد؛ پس از اتصال همگام می‌شود');
+    }catch(err){toast(firestoreErrorMessage(err))}finally{window.setTimeout(()=>{if(!btn.classList.contains('is-done'))btn.disabled=false;btn.dataset.busy='0'},300)}
+  });
   document.querySelector('[data-status-change]')?.addEventListener('click',()=>openStatusPrompt(c));
   document.querySelector('[data-toggle-history]')?.addEventListener('click',e=>toggleContractHistory(c.id,e.currentTarget));
 }
@@ -1286,7 +1326,7 @@ function openAdminDetail(id){
   document.getElementById('detailTitle').textContent=c.customerName;document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[effectiveContractStatus(c)]}`;
   const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
   document.getElementById('detailContent').innerHTML=`
-<div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong>${detailDueHtml(c,ds)}</strong></div></div>
+<div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[effectiveContractStatus(c)]}</strong></div></div><div class="timing-strip"><span>وضعیت زمانی</span><strong class="timing-state ${ds.key}">${detailDueHtml(c,ds)}</strong></div></div>
 <div class="detail-toolbar"><button class="secondary" data-detail-edit="${c.id}">ویرایش اطلاعات قرارداد</button><button class="status-change-btn" data-status-change="${c.id}">تغییر وضعیت قرارداد</button><button class="secondary history-toggle-btn" data-toggle-history="${c.id}">تاریخچه تغییرات</button></div>
 <div id="contractHistoryPanel" class="contract-history-panel is-hidden" data-history-contract="${c.id}"></div>
 <section class="panel detail-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">جمع وزن‌ها: ۱۰۰٪</span></div><div class="activity-add"><input id="activitySearch" placeholder="جستجو در کتابخانه؛ مثلاً سقف" autocomplete="off"><button class="primary" id="addSelectedActivity" disabled>+ اضافه کردن</button><div id="activitySuggestions" class="suggestions" style="display:none"></div></div><div class="activity-table" id="activityRows">${sorted.length?sorted.map(a=>activityRow(c,a)).join(''):'<div class="empty">هنوز فعالیتی برای این قرارداد تعریف نشده.</div>'}</div></section>

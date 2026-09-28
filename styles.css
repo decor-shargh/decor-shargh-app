@@ -457,3 +457,34 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
   .bar-value-wrap>strong{font-size:9px}
   .progress-alert-tag{font-size:6.2px;padding:2px 3px}
 }
+
+/* V15.7 — reliable supervisor updates, live stopped timing and aligned progress labels */
+.badge.normal{background:#ecfdf5;color:#047857;border:1px solid #bbf7d0}
+.contract-card.normal::before{background:#16a34a}
+.timing-state.normal{color:#15803d}.timing-state.near{color:#b45309}.timing-state.critical,.timing-state.overdue{color:#b91c1c}
+.stop-card-info{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin:7px 0;padding:7px 9px;border-radius:10px;background:#f8fafc;border:1px solid var(--line);font-size:10.5px;line-height:1.55;color:var(--muted)}
+.stop-card-info b{color:var(--text);font-weight:800}.stop-card-info span:last-child{white-space:nowrap;color:#6b7280;font-weight:700}
+
+/* Percent is a fixed column directly beside the bar; alert sits to its left. */
+.progress-chart .bar-row{grid-template-columns:minmax(105px,170px) minmax(0,1fr) minmax(118px,138px);gap:8px}
+.bar-value-wrap{display:grid;grid-template-columns:minmax(70px,1fr) 44px;align-items:center;gap:5px;width:100%;min-width:0;direction:ltr;white-space:nowrap}
+.bar-value-wrap>strong{grid-column:2;grid-row:1;text-align:right;direction:rtl;font-size:11px;font-weight:900;white-space:nowrap}
+.bar-value-wrap>.progress-alert-tag{grid-column:1;grid-row:1;justify-self:end;direction:rtl;font-size:9.5px;padding:3px 6px;white-space:nowrap}
+
+:root[data-theme="dark"] .badge.normal{background:#10281f;color:#86efac;border-color:#14532d}
+:root[data-theme="dark"] .timing-state.normal{color:#86efac}:root[data-theme="dark"] .timing-state.near{color:#fcd34d}:root[data-theme="dark"] .timing-state.critical,:root[data-theme="dark"] .timing-state.overdue{color:#fca5a5}
+:root[data-theme="dark"] .stop-card-info{background:#111214;border-color:var(--line)}:root[data-theme="dark"] .stop-card-info span:last-child{color:#a1a1aa}
+
+@media(max-width:560px){
+  .progress-chart .bar-row{grid-template-columns:minmax(72px,90px) minmax(0,1fr) 116px;gap:5px}
+  .bar-value-wrap{grid-template-columns:72px 40px;gap:4px}
+  .bar-value-wrap>strong{font-size:10px}
+  .bar-value-wrap>.progress-alert-tag{font-size:9.5px;padding:3px 5px}
+  .stop-card-info{font-size:9.5px;padding:6px 8px;gap:5px}
+}
+@media(max-width:390px){
+  .progress-chart .bar-row{grid-template-columns:minmax(66px,82px) minmax(0,1fr) 108px;gap:4px}
+  .bar-value-wrap{grid-template-columns:67px 37px;gap:4px}
+  .bar-value-wrap>strong{font-size:9.5px}
+  .bar-value-wrap>.progress-alert-tag{font-size:9px;padding:2px 4px}
+}

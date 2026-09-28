@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v15-6-20260928-kpi-chart-layout';
+const CACHE_NAME = 'decor-shargh-v15-7-20260928-reliable-supervisor-timing';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=156',
-  './app.js?v=156',
-  './manifest.webmanifest?v=156',
-  './brand-ui.webp?v=156',
-  './icon-192.png?v=156',
-  './icon-512.png?v=156',
-  './apple-touch-icon.png?v=156',
+  './styles.css?v=157',
+  './app.js?v=157',
+  './manifest.webmanifest?v=157',
+  './brand-ui.webp?v=157',
+  './icon-192.png?v=157',
+  './icon-512.png?v=157',
+  './apple-touch-icon.png?v=157',
   './version.json'
 ];
 
