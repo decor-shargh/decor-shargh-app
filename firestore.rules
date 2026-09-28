@@ -27,8 +27,12 @@ service cloud.firestore {
       return isActiveRole("siteSupervisor");
     }
 
+    function isProjectManager() {
+      return isActiveRole("projectManager");
+    }
+
     function isActiveAppUser() {
-      return isAdmin() || isSiteSupervisor();
+      return isAdmin() || isSiteSupervisor() || isProjectManager();
     }
 
     match /users/{userId} {
@@ -56,7 +60,7 @@ service cloud.firestore {
     }
 
     match /contracts/{contractId} {
-      allow read: if isAdmin() || isSiteSupervisor();
+      allow read: if isAdmin() || isSiteSupervisor() || isProjectManager();
       allow create, delete: if isAdmin();
 
       // Admin has full edit access. Site supervisor may only update execution progress
@@ -82,11 +86,21 @@ service cloud.firestore {
           || request.resource.data.status in ['pendingStart', 'inProgress', 'stopped', 'terminated']
           || (request.resource.data.status == 'completed' && request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']))
         )
+      ) || (
+        isProjectManager()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'openIssueCount',
+          'latestOpenIssue',
+          'updatedAt',
+          'updatedBy',
+          'appVersion'
+        ])
+        && request.resource.data.updatedBy == request.auth.uid
       );
 
       match /history/{historyId} {
         allow read: if isAdmin() || isSiteSupervisor();
-        allow create: if isActiveAppUser()
+        allow create: if (isAdmin() || isSiteSupervisor())
           && request.resource.data.contractId == contractId
           && request.resource.data.changedByUid == request.auth.uid;
         allow update: if false;
@@ -94,9 +108,9 @@ service cloud.firestore {
       }
 
       match /issues/{issueId} {
-        allow read: if isAdmin() || isSiteSupervisor();
+        allow read: if isAdmin() || isSiteSupervisor() || isProjectManager();
 
-        allow create: if isActiveAppUser()
+        allow create: if (isAdmin() || isSiteSupervisor())
           && request.resource.data.contractId == contractId
           && request.resource.data.createdByUid == request.auth.uid;
 
@@ -112,6 +126,26 @@ service cloud.firestore {
             'completedAt',
             'updatedAt',
             'updatedAtClient'
+          ])
+        ) || (
+          isProjectManager()
+          && resource.data.status != 'done'
+          && request.resource.data.status == 'done'
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.contractId == resource.data.contractId
+          && request.resource.data.text == resource.data.text
+          && request.resource.data.managerActionByUid == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'status',
+            'completedAt',
+            'updatedAt',
+            'updatedAtClient',
+            'managerNote',
+            'managerActionByUid',
+            'managerActionByName',
+            'managerActionByEmail',
+            'managerActionAt',
+            'managerActionAtClient'
           ])
         );
 

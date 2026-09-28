@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v15-9-20260928-stopped-attention';
+const CACHE_NAME = 'decor-shargh-v16-20260928-project-manager-financial';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=158',
-  './app.js?v=158',
-  './manifest.webmanifest?v=158',
-  './brand-ui.webp?v=158',
-  './icon-192.png?v=158',
-  './icon-512.png?v=158',
-  './apple-touch-icon.png?v=158',
+  './styles.css?v=160',
+  './app.js?v=160',
+  './manifest.webmanifest?v=160',
+  './brand-ui.webp?v=160',
+  './icon-192.png?v=160',
+  './icon-512.png?v=160',
+  './apple-touch-icon.png?v=160',
   './version.json'
 ];
 

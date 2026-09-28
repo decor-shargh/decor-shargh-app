@@ -4,22 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#ffffff" />
-  <meta name="app-version" content="15.9.0" />
+  <meta name="app-version" content="16.0.0" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Decor Shargh" />
   <title>Decor Shargh | Admin Panel</title>
-  <link rel="manifest" href="manifest.webmanifest?v=158" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=158" />
-  <link rel="icon" href="icon-192.png?v=158" />
+  <link rel="manifest" href="manifest.webmanifest?v=160" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=160" />
+  <link rel="icon" href="icon-192.png?v=160" />
   <script>try{const t=localStorage.getItem('decorSharghTheme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css?v=158" />
+  <link rel="stylesheet" href="styles.css?v=160" />
 </head>
 <body>
   <section id="bootSplash" class="boot-splash" aria-live="polite">
     <div class="boot-brand">
-      <div class="boot-logo"><img src="brand-ui.webp?v=158" alt="Decor Shargh"></div>
+      <div class="boot-logo"><img src="brand-ui.webp?v=160" alt="Decor Shargh"></div>
       <div class="boot-name">Decor Shargh</div>
       <div class="boot-loader" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="boot-text">در حال آماده‌سازی...</div>
@@ -29,7 +29,7 @@
   <section id="installPrompt" class="install-sheet is-hidden" aria-hidden="true">
     <div class="install-backdrop" data-install-dismiss></div>
     <div class="install-card">
-      <div class="install-icon"><img src="brand-ui.webp?v=158" alt="Decor Shargh"></div>
+      <div class="install-icon"><img src="brand-ui.webp?v=160" alt="Decor Shargh"></div>
       <div class="install-copy">
         <h3>Install Decor Shargh</h3>
         <p id="installText">برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.</p>
@@ -47,7 +47,7 @@
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card login-reference-card">
       <div class="login-logo-wrap">
-        <img class="brand-login-logo" src="brand-ui.webp?v=158" alt="لوگوی دکوراسیون شرق">
+        <img class="brand-login-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق">
       </div>
       <div class="login-heading">
         <h1>Decor Shargh Control Center</h1>
@@ -77,7 +77,7 @@
     <div class="auth-decor auth-decor-one"></div>
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=158" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
       <h2>در انتظار تأیید حساب</h2>
       <p id="pendingEmail" class="pending-email"></p>
       <div class="pending-badge">در انتظار تأیید مدیر</div>
@@ -89,7 +89,7 @@
 
   <section id="blockedGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=158" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
       <h2>دسترسی لغو شده</h2>
       <p class="muted">این حساب در حال حاضر اجازه ورود به سامانه را ندارد.</p>
       <button id="blockedLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -98,7 +98,7 @@
 
   <section id="roleGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=158" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=160" alt="لوگوی دکوراسیون شرق"></div>
       <h2 id="roleGateTitle">دسترسی تأیید شد</h2>
       <p id="roleGateCopy" class="muted pending-copy">پنل این نقش هنوز در حال آماده‌سازی است.</p>
       <button id="roleGateLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -108,7 +108,7 @@
   <div class="app-shell is-hidden" id="appShell">
     <header class="topbar">
       <div class="top-brand">
-        <img src="brand-ui.webp?v=158" alt="Decor Shargh logo">
+        <img src="brand-ui.webp?v=160" alt="Decor Shargh logo">
         <div class="brand-copy">
           <h1>Decor Shargh</h1>
         </div>
@@ -138,12 +138,21 @@
           </div>
         </section>
 
-        <section class="panel compact-attention-panel">
+        <section class="panel compact-attention-panel" id="attentionPanel">
           <div class="section-head">
             <h2>قراردادهای نیازمند توجه</h2>
             <span class="muted" id="attentionCount"></span>
           </div>
           <div id="attentionList" class="card-list"></div>
+        </section>
+
+        <section class="panel manager-priority-panel is-hidden" id="managerPriorityPanel">
+          <div class="section-head"><h2>موارد اولویت‌دار</h2></div>
+          <div class="manager-priority-buttons">
+            <button type="button" class="manager-priority-btn critical" data-manager-priority="critical"><span>بحرانی</span><strong id="managerCriticalCount">۰</strong></button>
+            <button type="button" class="manager-priority-btn near" data-manager-priority="near"><span>نزدیک سررسید</span><strong id="managerNearCount">۰</strong></button>
+          </div>
+          <div id="managerPriorityList" class="manager-priority-list"></div>
         </section>
       </section>
 
@@ -153,6 +162,16 @@
           <div class="filter-grid compact-filter-grid">
             <label>نام مشتری
               <input id="filterCustomer" type="search" placeholder="جستجو..." />
+            </label>
+            <label>وضعیت
+              <select id="filterStatus">
+                <option value="">همه</option>
+                <option value="pendingStart">در انتظار شروع</option>
+                <option value="inProgress">در حال انجام</option>
+                <option value="stopped">متوقف</option>
+                <option value="terminated">فسخ‌شده</option>
+                <option value="completed">خاتمه‌یافته</option>
+              </select>
             </label>
             <label>سال عقد قرارداد
               <input id="filterYear" type="text" inputmode="numeric" placeholder="۱۴۰۵" maxlength="4" />
@@ -174,20 +193,43 @@
                 <option value="12">اسفند</option>
               </select>
             </label>
-            <label>وضعیت
-              <select id="filterStatus">
-                <option value="">همه</option>
-                <option value="pendingStart">در انتظار شروع</option>
-                <option value="inProgress">در حال انجام</option>
-                <option value="stopped">متوقف</option>
-                <option value="terminated">فسخ‌شده</option>
-                <option value="completed">خاتمه‌یافته</option>
-              </select>
-            </label>
           </div>
           <button id="clearFilters" class="secondary compact-clear-btn">پاک کردن فیلترها</button>
         </section>
         <div id="contractsList" class="contract-grid"></div>
+      </section>
+
+      <section class="view" data-view="financial">
+        <div class="section-head sticky-title"><h2>گزارش مالی</h2></div>
+        <section class="panel period-filter-panel">
+          <div class="section-head"><div><h3>فیلتر دوره</h3><p class="muted small">مبنای فیلتر، تاریخ عقد قرارداد است. اگر هیچ ماهی انتخاب نشود، همه قراردادها محاسبه می‌شوند.</p></div><div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="financial">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="financial">نمایش همه</button></div></div>
+          <div id="financialPeriodPicker" class="period-picker"></div>
+        </section>
+        <div id="financialKpis" class="financial-kpi-grid"></div>
+        <section class="panel">
+          <div class="section-head"><h3>مبلغ قراردادها بر اساس وضعیت</h3></div>
+          <div id="financialStatusChart" class="financial-status-chart"></div>
+        </section>
+      </section>
+
+      <section class="view" data-view="outputs">
+        <div class="section-head sticky-title"><h2>خروجی</h2></div>
+        <section class="panel period-filter-panel">
+          <div class="section-head"><div><h3>انتخاب ماه‌ها</h3><p class="muted small">مبنای انتخاب، تاریخ عقد قرارداد است. می‌توانید از چند سال، ماه‌های دلخواه را انتخاب کنید.</p></div><div class="period-actions"><button type="button" class="secondary" data-period-action="all" data-period-target="output">انتخاب همه</button><button type="button" class="secondary" data-period-action="clear" data-period-target="output">نمایش همه</button></div></div>
+          <div id="outputPeriodPicker" class="period-picker"></div>
+        </section>
+        <section class="panel output-menu-panel">
+          <div class="output-report-grid">
+            <button type="button" class="output-report-btn critical" data-report-type="critical"><span>قراردادهای بحرانی</span><strong>PDF</strong></button>
+            <button type="button" class="output-report-btn near" data-report-type="near"><span>نزدیک سررسید</span><strong>PDF</strong></button>
+            <button type="button" class="output-report-btn issues" data-report-type="issues"><span>مشکلات باز</span><strong>PDF</strong></button>
+            <button type="button" class="output-report-btn summary" data-report-type="summary"><span>خلاصه وضعیت همه قراردادها</span><strong>PDF</strong></button>
+          </div>
+        </section>
+        <section class="panel report-preview-panel is-hidden" id="reportPreviewPanel">
+          <div class="section-head"><h3 id="reportPreviewTitle">پیش‌نمایش گزارش</h3><div class="report-actions"><button type="button" class="secondary" id="sharePrintReportBtn">چاپ / Share</button><button type="button" class="primary" id="downloadReportPdfBtn">دانلود PDF</button></div></div>
+          <div id="reportPreview" class="report-preview"></div>
+        </section>
       </section>
 
       <section class="view" data-view="library">
@@ -232,10 +274,12 @@
     </main>
 
     <nav class="bottom-nav">
-      <button class="nav-item active" data-nav="home"><span>⌂</span><small>خانه</small></button>
-      <button class="nav-item" data-nav="contracts"><span>▤</span><small>قراردادها</small></button>
-      <button class="nav-item" data-nav="library"><span>▦</span><small>کتابخانه</small></button>
-      <button class="nav-item" data-nav="more"><span>•••</span><small>بیشتر</small></button>
+      <button class="nav-item nav-home active" data-nav="home"><span>⌂</span><small>خانه</small></button>
+      <button class="nav-item nav-contracts" data-nav="contracts"><span>▤</span><small>قراردادها</small></button>
+      <button class="nav-item nav-financial" data-nav="financial"><span>◫</span><small>گزارش مالی</small></button>
+      <button class="nav-item nav-library" data-nav="library"><span>▦</span><small>کتابخانه</small></button>
+      <button class="nav-item nav-outputs" data-nav="outputs"><span>⇩</span><small>خروجی</small></button>
+      <button class="nav-item nav-more" data-nav="more"><span>•••</span><small>بیشتر</small></button>
     </nav>
   </div>
 
@@ -335,6 +379,7 @@
       <div class="panel-preview-list">
         <button type="button" class="panel-preview-option" data-preview-role="admin"><span>👤</span><div><strong>پنل ادمین</strong><small>نمای کامل مدیریت</small></div><b>←</b></button>
         <button type="button" class="panel-preview-option" data-preview-role="siteSupervisor"><span>👷</span><div><strong>پنل سرپرست اجرا</strong><small>خانه و بروزرسانی سریع قراردادها</small></div><b>←</b></button>
+        <button type="button" class="panel-preview-option" data-preview-role="projectManager"><span>📊</span><div><strong>پنل مدیر پروژه</strong><small>داشبورد مدیریتی، گزارش مالی و خروجی‌ها</small></div><b>←</b></button>
       </div>
     </div>
   </div>
@@ -373,6 +418,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js?v=158"></script>
+  <script src="app.js?v=160"></script>
 </body>
 </html>
