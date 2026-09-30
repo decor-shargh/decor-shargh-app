@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="18.0.0";
+const APP_VERSION="18.1.0";
 
 let auth=null;
 let db=null;
@@ -101,6 +101,61 @@ async function triggerInstall(){
   }
   hideInstallPrompt();
 }
+let serviceWorkerReloading=false;
+const SW_RELOAD_SESSION_KEY='decorSharghSwReloadV181';
+
+function normalizeBottomNav(){
+  // V18 removed Library from the bottom bar for every role. If Android restores
+  // an older DOM snapshot, remove the obsolete item before the user sees a 6-item bar.
+  document.querySelectorAll('.bottom-nav [data-nav="library"], .bottom-nav .nav-library').forEach(el=>el.remove());
+}
+function hardReloadForVersion(targetVersion=APP_VERSION){
+  const target=String(targetVersion||APP_VERSION);
+  try{
+    const guardKey=`decorSharghHardReload:${target}`;
+    const last=Number(sessionStorage.getItem(guardKey)||0);
+    if(last&&Date.now()-last<12000)return;
+    sessionStorage.setItem(guardKey,String(Date.now()));
+  }catch{}
+  const url=new URL(location.href);
+  url.searchParams.set('__decor_v',target.replace(/[^0-9A-Za-z_-]/g,''));
+  url.searchParams.set('__decor_refresh',String(Date.now()));
+  location.replace(url.toString());
+}
+function cleanReloadQuery(){
+  try{
+    const url=new URL(location.href);
+    if(!url.searchParams.has('__decor_refresh')&&!url.searchParams.has('__decor_v'))return;
+    url.searchParams.delete('__decor_refresh');
+    url.searchParams.delete('__decor_v');
+    history.replaceState(history.state,'',url.pathname+(url.search?url.search:'')+url.hash);
+  }catch{}
+}
+function bindServiceWorkerRefresh(){
+  if(!('serviceWorker' in navigator))return;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{
+    if(serviceWorkerReloading)return;
+    try{
+      if(sessionStorage.getItem(SW_RELOAD_SESSION_KEY)===APP_VERSION)return;
+      sessionStorage.setItem(SW_RELOAD_SESSION_KEY,APP_VERSION);
+    }catch{}
+    serviceWorkerReloading=true;
+    hardReloadForVersion(APP_VERSION);
+  });
+  navigator.serviceWorker.addEventListener('message',event=>{
+    if(event?.data?.type==='APP_UPDATED'&&event.data.version&&event.data.version!==APP_VERSION){
+      hardReloadForVersion(event.data.version);
+    }
+  });
+}
+async function registerServiceWorkerNow(){
+  if(!('serviceWorker' in navigator))return;
+  try{
+    const reg=await navigator.serviceWorker.register('./service-worker.js',{scope:'./',updateViaCache:'none'});
+    await reg.update().catch(()=>{});
+  }catch{}
+}
+
 function setupPwaInstall(){
   window.addEventListener('beforeinstallprompt',e=>{
     e.preventDefault();
@@ -115,11 +170,9 @@ function setupPwaInstall(){
   document.getElementById('installAppBtn')?.addEventListener('click',triggerInstall);
   document.getElementById('dismissInstallBtn')?.addEventListener('click',hideInstallPrompt);
   document.querySelectorAll('[data-install-dismiss]').forEach(el=>el.addEventListener('click',hideInstallPrompt));
-  if('serviceWorker' in navigator){
-    window.addEventListener('load',()=>{
-      navigator.serviceWorker.register('./service-worker.js',{scope:'./'}).then(reg=>reg.update()).catch(()=>{});
-    });
-  }
+  // Register/update immediately instead of waiting for window.load. This prevents
+  // Android standalone mode from keeping an older restored shell until manual refresh.
+  registerServiceWorkerNow();
 }
 
 
@@ -2448,19 +2501,34 @@ restoreFileInput?.addEventListener('change',async()=>{
 
 async function checkForAppUpdate(){
   try{
-    const res=await fetch(`version.json?t=${Date.now()}`,{cache:'no-store'});
+    normalizeBottomNav();
+    const htmlVersion=document.querySelector('meta[name="app-version"]')?.getAttribute('content')||'';
+    if(htmlVersion&&htmlVersion!==APP_VERSION){
+      hardReloadForVersion(APP_VERSION);
+      return;
+    }
+    const res=await fetch(`version.json?t=${Date.now()}`,{cache:'no-store',headers:{'Cache-Control':'no-cache'}});
     if(!res.ok)return;
     const info=await res.json();
     if(info?.version&&info.version!==APP_VERSION){
       const regs='serviceWorker' in navigator?await navigator.serviceWorker.getRegistrations():[];
       await Promise.all(regs.map(r=>r.update().catch(()=>{})));
-      location.reload();
+      hardReloadForVersion(info.version);
     }
   }catch{}
 }
 window.addEventListener('focus',checkForAppUpdate);
+window.addEventListener('pageshow',event=>{
+  normalizeBottomNav();
+  // pageshow(persisted) catches Android/BFCache restoration of an older app snapshot.
+  if(event.persisted)checkForAppUpdate();
+  else window.setTimeout(checkForAppUpdate,0);
+});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')checkForAppUpdate()});
 
+normalizeBottomNav();
+cleanReloadQuery();
+bindServiceWorkerRefresh();
 setupPwaInstall();
 initFirebaseAuth();
 checkForAppUpdate();

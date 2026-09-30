@@ -16,3 +16,13 @@
 - Firebase Auth/Session و ساختار کاربران تغییر نکرده است.
 
 نکته: چون دسترسی Site Supervisor به historicalContracts اضافه شده، `firestore.rules` این نسخه باید قبل از استفاده کامل Publish شود.
+
+
+## V18.1 — PWA resume / stale bottom-nav fix
+- Fixed Android standalone/PWA resume showing an older cached bottom navigation until manual refresh.
+- Service worker is registered and updated immediately with updateViaCache=none.
+- controllerchange/message/pageshow checks refresh the shell only when a version mismatch is detected.
+- One-time V18 cache migration refreshes an already-restored V18 window.
+- Obsolete Library bottom-nav item is defensively removed; Library remains available under More for Admin.
+- Base bottom navigation uses five columns for stable Admin first paint.
+- No Firebase Auth/session/data schema/rules changes.
