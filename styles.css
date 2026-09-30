@@ -636,3 +636,43 @@ main{padding:12px 16px}.kpi-grid{gap:10px;margin-bottom:12px}.kpi{padding:12px 1
   .role-project-manager .brand-copy h1{font-size:12px}.role-project-manager .panel-badge{font-size:7.5px;padding:4px 5px}.role-project-manager .logout-btn{font-size:8.5px;padding:4px 5px}
   .financial-bar-row{grid-template-columns:64px minmax(54px,1fr) 106px}.financial-bar-row strong{font-size:10px}
 }
+
+/* V17 — historical contracts archive + safe import */
+.contract-mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin:0 0 10px}
+.contract-mode-btn{min-height:38px;border:1px solid var(--line);background:var(--panel);border-radius:11px;font-size:11px;font-weight:900;color:var(--text);cursor:pointer}
+.contract-mode-btn.active{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 4px 14px rgba(31,95,79,.14)}
+.contract-mode-btn span{font-size:9px;opacity:.85;margin-inline-start:4px}
+.archive-import-panel{padding:11px!important;margin-bottom:10px;border:1px dashed rgba(31,95,79,.28)}
+.archive-import-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;min-width:0}
+.archive-import-head>div:first-child{min-width:0}.archive-import-head h3{font-size:13px;margin:0}.archive-import-head p{margin:3px 0 0;line-height:1.6}
+.archive-import-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.archive-import-actions button{font-size:9.5px;min-height:32px;padding:6px 9px}
+.archive-import-status{margin-top:9px}.archive-dryrun-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.archive-dryrun-grid>div{border:1px solid var(--line);border-radius:9px;padding:7px;text-align:center;background:var(--soft)}.archive-dryrun-grid span{display:block;font-size:8.5px;color:var(--muted)}.archive-dryrun-grid strong{display:block;font-size:13px;margin-top:2px}
+.archive-warning{margin-top:7px;padding:7px 8px;border-radius:9px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:9.5px;line-height:1.7;overflow-wrap:anywhere}.archive-warning.danger{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+.archive-contract-card{border-right:4px solid #16a34a}.archive-badge{background:#eef2ff!important;color:#4338ca!important}.archive-timing-strip strong{direction:rtl}
+:root[data-theme="dark"] .archive-warning{background:#2a1d0e;border-color:#633b17;color:#fdba74}:root[data-theme="dark"] .archive-warning.danger{background:#2a1111;border-color:#642626;color:#fca5a5}:root[data-theme="dark"] .archive-badge{background:#202348!important;color:#c7d2fe!important}
+@media(max-width:560px){
+  .contract-mode-tabs{gap:5px}.contract-mode-btn{min-height:34px;font-size:10px}
+  .archive-import-head{display:grid;grid-template-columns:1fr;gap:8px}.archive-import-actions{justify-content:stretch}.archive-import-actions button{flex:1;min-width:0}
+  .archive-dryrun-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+
+/* V17.1 — collapsible finance-period contract drilldown */
+.financial-contract-groups-panel{margin-top:12px}
+.financial-groups-head{align-items:center}
+.financial-contract-groups{display:grid;gap:8px}
+.financial-period-group{border:1px solid var(--line);border-radius:12px;background:var(--panel);overflow:hidden}
+.financial-period-group>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 12px;min-height:48px;user-select:none}
+.financial-period-group>summary::-webkit-details-marker{display:none}
+.financial-period-title{display:flex;align-items:center;gap:7px;min-width:0}.financial-period-title strong{font-size:12px;white-space:nowrap}.financial-period-title small{font-size:10px;color:var(--muted);white-space:nowrap}
+.financial-period-summary-meta{display:flex;align-items:center;gap:10px;min-width:0}.financial-period-summary-meta>b{font-size:11px;white-space:nowrap;color:var(--text)}.financial-period-toggle-label{font-size:10px;font-weight:900;color:var(--primary);white-space:nowrap}
+.financial-period-group[open] .financial-period-toggle-label{font-size:0}.financial-period-group[open] .financial-period-toggle-label::after{content:'بستن';font-size:10px}
+.financial-period-contracts{border-top:1px solid var(--line);padding:4px 10px 8px}
+.financial-period-contract-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:9px 2px;border-bottom:1px solid color-mix(in srgb,var(--line) 70%,transparent)}
+.financial-period-contract-row:last-child{border-bottom:0}
+.financial-period-contract-main{min-width:0;display:flex;flex-direction:column;gap:3px}.financial-period-contract-main strong{font-size:11.5px;line-height:1.5;overflow-wrap:anywhere}.financial-period-contract-main span{font-size:9.5px;color:var(--muted)}
+.financial-period-contract-meta{display:flex;align-items:flex-end;flex-direction:column;gap:4px;text-align:left;min-width:0}.financial-period-contract-meta>strong{font-size:10.5px;white-space:nowrap}.financial-period-status{font-size:9px;color:var(--muted);white-space:nowrap}.financial-period-status.archive{color:var(--green);font-weight:800}
+@media(max-width:560px){
+  .financial-period-group>summary{padding:9px 10px;gap:7px}.financial-period-title{gap:5px}.financial-period-title strong{font-size:11px}.financial-period-title small{font-size:9px}.financial-period-summary-meta{gap:6px}.financial-period-summary-meta>b{font-size:9.5px}.financial-period-toggle-label,.financial-period-group[open] .financial-period-toggle-label::after{font-size:9px}
+  .financial-period-contract-row{gap:6px;padding:8px 1px}.financial-period-contract-main strong{font-size:10.5px}.financial-period-contract-main span{font-size:9px}.financial-period-contract-meta>strong{font-size:9.5px}.financial-period-status{font-size:8.5px}
+}

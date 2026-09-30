@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="16.2.0";
+const APP_VERSION="17.1.0";
 
 let auth=null;
 let db=null;
@@ -30,6 +30,11 @@ let libraryActivityDocs=[];
 let libraryUnsubs=[];
 let contractsReady=false;
 let contractsUnsub=null;
+let historicalContractsReady=false;
+let historicalContractsUnsub=null;
+let contractListMode='current';
+let contractFormCollection='current';
+let pendingArchiveImport=null;
 let contractFormActivities=[];
 let contractFormSelectedLibraryActivity=null;
 let contractFormSaving=false;
@@ -387,6 +392,7 @@ async function routeUserByProfile(user,profile){
     currentAdmin=currentUserProfile;startPresenceTracking();showApp();
     if(!libraryUnsubs.length)initLibraryFirestore().catch(err=>toast(firestoreErrorMessage(err)));
     if(!contractsUnsub)initContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    if(!historicalContractsUnsub)initHistoricalContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
     return;
   }
   if(role==='siteSupervisor'&&active){
@@ -400,6 +406,7 @@ async function routeUserByProfile(user,profile){
   if(role==='projectManager'&&active){
     currentAdmin=currentUserProfile;startPresenceTracking();stopLibrarySync();state.library=[];showApp();
     if(!contractsUnsub)initContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    if(!historicalContractsUnsub)initHistoricalContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
     return;
   }
   showPending(profile,user);
@@ -475,7 +482,7 @@ const initialLibrary=[
 
 function score(v,l,c){return +(v*.4+l*.35+c*.25).toFixed(2)}
 function uid(prefix='id'){return prefix+'_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8)}
-function freshState(){return {contracts:[],library:[]}}
+function freshState(){return {contracts:[],historicalContracts:[],library:[]}}
 let state=freshState();
 let libraryExpandedCats=new Set();
 let systemLogs=[];
@@ -632,11 +639,17 @@ async function deleteActivityRemote(id){
 }
 
 const CONTRACT_COLLECTION='contracts';
+const HISTORICAL_CONTRACT_COLLECTION='historicalContracts';
 const CONTRACT_META_DOC='appMeta/contractsMigration';
 
+function stopHistoricalContractsSync(){
+  if(historicalContractsUnsub){try{historicalContractsUnsub()}catch{}historicalContractsUnsub=null}
+  historicalContractsReady=false;
+}
 function stopContractSync(){
   if(contractsUnsub){try{contractsUnsub()}catch{}contractsUnsub=null}
   contractsReady=false;
+  stopHistoricalContractsSync();
 }
 function contractDocPayload(c){
   return {
@@ -663,6 +676,42 @@ function contractDocPayload(c){
     progressByActivity:(c.progressByActivity&&typeof c.progressByActivity==='object')?Object.fromEntries(Object.entries(c.progressByActivity).map(([k,v])=>[k,Math.max(0,Math.min(100,Number(v)||0))])):{}
   };
 }
+
+function historicalContractDocPayload(c){
+  const activities=Array.isArray(c.activities)?c.activities.map((a,i)=>({
+    id:a.id||`hist_${normalizePenCode(c.penCode)||'item'}_a${i+1}`,
+    libraryId:a.libraryId||'',
+    categoryId:a.categoryId||'',
+    categoryName:a.categoryName||'بایگانی',
+    name:String(a.name||''),
+    baseScore:Number(a.baseScore)||1,
+    progress:100
+  })):[];
+  return {
+    customerName:String(c.customerName||'').trim(),
+    penCode:String(c.penCode||'').trim(),
+    amount:String(c.amount??''),
+    contractDate:String(c.contractDate||''),
+    endDate:String(c.endDate||''),
+    compDate:String(c.compDate||''),
+    notes:String(c.notes||''),
+    status:'completed',
+    activities,
+    statusReason:'',
+    statusDate:'',
+    completedAt:c.completedAt||null,
+    progressByActivity:{},
+    archived:true,
+    archiveSource:String(c.archiveSource||c.source||'excel'),
+    sourceRows:String(c.sourceRows||''),
+    importBatchId:String(c.importBatchId||'')
+  };
+}
+function normalizePenCode(v=''){return toEn(String(v)).replace(/[^0-9A-Za-z]/g,'').trim()}
+function getHistoricalContract(id){return state.historicalContracts.find(c=>c.id===id)}
+function financialContractPool(){return [...state.contracts,...state.historicalContracts]}
+function homeStatsContractPool(){return isAdminUi()?[...state.contracts,...state.historicalContracts]:[...state.contracts]}
+function archiveDocId(c){const code=normalizePenCode(c.penCode);return `hist_${code||uid('archive')}`}
 async function migrateLegacyContractsIfNeeded(){
   // Migration is intentionally PER DEVICE, not controlled by one global Firestore flag.
   // Older cached builds could still have contracts only in this browser's LocalStorage.
@@ -724,6 +773,29 @@ async function initContractsFirestore(){
     migrateLegacyContractsIfNeeded().catch(()=>{});
     db.doc('appMeta/runtime').set({appVersion:APP_VERSION,lastSeenAt:firebase.firestore.FieldValue.serverTimestamp(),lastSeenBy:currentAdmin?.uid||''},{merge:true}).catch(()=>{});
   }
+}
+
+async function initHistoricalContractsFirestore(){
+  if(!db||historicalContractsUnsub||!(isAdminRole()||isProjectManagerRole()))return;
+  historicalContractsReady=false;
+  historicalContractsUnsub=db.collection(HISTORICAL_CONTRACT_COLLECTION).onSnapshot({includeMetadataChanges:true},snap=>{
+    state.historicalContracts=snap.docs.map(d=>({id:d.id,...d.data(),_historical:true}));
+    historicalContractsReady=true;
+    if(appStarted)scheduleContractViewsRender();
+  },err=>{if(isAdminRole()||isProjectManagerRole())toast(firestoreErrorMessage(err))});
+}
+async function updateHistoricalContractRemote(id,patch){
+  if(!db||!currentAdmin||!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
+  const current=getHistoricalContract(id)||{};
+  const payload=historicalContractDocPayload({...current,...patch,id});
+  const ref=db.collection(HISTORICAL_CONTRACT_COLLECTION).doc(id);
+  await ref.set({...payload,updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION},{merge:true});
+  const check=await ref.get();
+  if(!check.exists)throw Object.assign(new Error('firestore-update-not-confirmed'),{code:'unavailable'});
+  const saved={id:check.id,...check.data(),_historical:true};
+  const i=state.historicalContracts.findIndex(c=>c.id===id);
+  if(i>=0)state.historicalContracts[i]=saved;else state.historicalContracts.push(saved);
+  return saved;
 }
 
 function contractChangeSummary(before={},after={}){
@@ -957,12 +1029,13 @@ function effectiveActivityProgress(c,a){
   if(map&&Object.prototype.hasOwnProperty.call(map,a.id))return Math.max(0,Math.min(100,Number(map[a.id])||0));
   return Math.max(0,Math.min(100,Number(a?.progress)||0));
 }
-function contractProgress(c){if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+(effectiveActivityProgress(c,a)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
+function contractProgress(c){if(c?.archived===true||c?._historical===true)return 100;if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+(effectiveActivityProgress(c,a)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
 function activityWeight(c,a){const total=c.activities.reduce((s,x)=>s+(Number(x.baseScore)||0),0);return total?+(a.baseScore/total*100).toFixed(1):0}
 function hasAnyContractProgress(c){return (c.activities||[]).some(a=>effectiveActivityProgress(c,a)>0)}
 function allContractActivitiesDone(c){return !!c.activities?.length&&c.activities.every(a=>effectiveActivityProgress(c,a)===100)}
 function automaticContractStatus(c){if(allContractActivitiesDone(c))return 'completed';return hasAnyContractProgress(c)?'inProgress':'pendingStart'}
 function effectiveContractStatus(c){
+  if(c?.archived===true||c?._historical===true)return 'completed';
   const raw=String(c?.status||'');
   // Completion is never manual: when every activity reaches 100%, it wins automatically.
   if(allContractActivitiesDone(c||{}))return 'completed';
@@ -1026,6 +1099,14 @@ ${contractIssueBadge(c)}
 <div class="manager-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>مشاهده جزئیات ←</span></div>
 </article>`}
 
+function archiveContractCard(c){const p=contractProgress(c);const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ۱۰۰٪</span>`).join('')||'<span class="muted small">فعالیتی ثبت نشده است</span>';return `<article class="contract-card archive-contract-card completed" data-open-archive-contract="${c.id}">
+<div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
+<div class="contract-meta"><span class="badge completed">خاتمه‌یافته</span><span class="badge archive-badge">بایگانی</span></div>
+<div class="progress-row"><span class="small">پیشرفت</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
+<div class="activities-mini">${acts}</div>
+<div class="card-actions"><button class="secondary" data-archive-action="view" data-id="${c.id}">مشاهده</button><button class="secondary" data-archive-action="edit" data-id="${c.id}">ویرایش</button></div>
+</article>`}
+
 function contractCard(c){return isSupervisorUi()?supervisorContractCard(c):isProjectManagerUi()?projectManagerContractCard(c):adminContractCard(c)}
 
 
@@ -1050,7 +1131,8 @@ function renderManagerPriorityList(){
 }
 
 function renderHome(){
-  const all=[...state.contracts];
+  const operational=[...state.contracts];
+  const all=homeStatsContractPool();
   const unfinished=unfinishedProjectContracts();
   const near=all.filter(c=>dueState(c).key==='near').sort(contractEndSort);
   const critical=all.filter(c=>['critical','overdue'].includes(dueState(c).key)).sort(contractEndSort);
@@ -1084,7 +1166,7 @@ function renderHome(){
     renderManagerPriorityList();
   }else{
     const priority=c=>{const st=effectiveContractStatus(c),k=dueState(c).key;if(['critical','overdue'].includes(k))return 0;if(st==='stopped')return 1;if(k==='near')return 2;return 3};
-    const attention=all.filter(c=>{const status=effectiveContractStatus(c),key=dueState(c).key;return status==='stopped'||key==='near'||key==='critical'||key==='overdue'}).sort((a,b)=>priority(a)-priority(b)||contractEndSort(a,b));
+    const attention=operational.filter(c=>{const status=effectiveContractStatus(c),key=dueState(c).key;return status==='stopped'||key==='near'||key==='critical'||key==='overdue'}).sort((a,b)=>priority(a)-priority(b)||contractEndSort(a,b));
     document.getElementById('attentionCount').textContent=attention.length?`${toFa(attention.length)} مورد`:'';
     document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{
       const ds=dueState(c),stopped=effectiveContractStatus(c)==='stopped';
@@ -1108,7 +1190,7 @@ function renderCharts(unfinished){
   }).join(''):'<div class="empty">داده‌ای برای نمودار پیشرفت وجود ندارد.</div>';
 
   const counts={pendingStart:0,inProgress:0,stopped:0,terminated:0,completed:0};
-  state.contracts.forEach(c=>{const status=effectiveContractStatus(c);if(Object.prototype.hasOwnProperty.call(counts,status))counts[status]++});
+  homeStatsContractPool().forEach(c=>{const status=effectiveContractStatus(c);if(Object.prototype.hasOwnProperty.call(counts,status))counts[status]++});
   const total=Object.values(counts).reduce((a,b)=>a+b,0);
   document.getElementById('donutTotal').textContent=toFa(total);
   const colors=['#64748b','#2563eb','#f59e0b','#dc2626','#16a34a'];
@@ -1135,24 +1217,37 @@ function clearVisibleContractFilters(){
 }
 
 function renderContracts(){
-  let arr=[...state.contracts].sort(contractListSort);
+  const archiveMode=isAdminUi()&&contractListMode==='archive';
+  const combinedMode=isAdminUi()&&contractListMode==='combined';
+  const completedAllMode=isAdminUi()&&contractListMode==='completedAll';
+  const modeTabs=document.getElementById('contractModeTabs');if(modeTabs)modeTabs.classList.toggle('is-hidden',!isAdminUi());
+  document.querySelectorAll('[data-contract-mode]').forEach(b=>b.classList.toggle('active',!combinedMode&&!completedAllMode&&b.dataset.contractMode===(archiveMode?'archive':'current')));
+  const archiveCount=document.getElementById('archiveCount');if(archiveCount)archiveCount.textContent=toFa(state.historicalContracts.length);
+  const importPanel=document.getElementById('archiveImportPanel');if(importPanel)importPanel.classList.toggle('is-hidden',!archiveMode);
+  const newBtn=document.getElementById('newContractBtn');if(newBtn)newBtn.classList.toggle('is-hidden',archiveMode||combinedMode||completedAllMode||!isAdminUi());
+  const heading=document.getElementById('contractsViewTitle');if(heading)heading.textContent=archiveMode?'بایگانی قراردادها':combinedMode?'کل قراردادها':completedAllMode?'قراردادهای خاتمه‌یافته':'قراردادها';
+  let arr=archiveMode?[...state.historicalContracts]:combinedMode?[...state.contracts,...state.historicalContracts]:completedAllMode?[...state.contracts,...state.historicalContracts].filter(c=>effectiveContractStatus(c)==='completed'):[...state.contracts];
+  arr=arr.sort(contractListSort);
   const name=document.getElementById('filterCustomer').value.trim();
   const year=normalizeYear(document.getElementById('filterYear').value);
   const month=document.getElementById('filterMonth').value;
   const st=document.getElementById('filterStatus').value;
-  if(dashboardKpiFilter)arr=arr.filter(c=>contractMatchesDashboardKpi(c,dashboardKpiFilter));
-  if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name));
+  if(!archiveMode&&!combinedMode&&!completedAllMode&&dashboardKpiFilter)arr=arr.filter(c=>contractMatchesDashboardKpi(c,dashboardKpiFilter));
+  if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name)||String(c.penCode||'').includes(toEn(name)));
   if(st)arr=arr.filter(c=>effectiveContractStatus(c)===st);
   if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));
   if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});
-  document.getElementById('contractsList').innerHTML=arr.length?arr.map(contractCard).join(''):'<div class="empty">قراردادی با این فیلتر پیدا نشد.</div>';
+  const list=document.getElementById('contractsList');
+  list.innerHTML=arr.length?arr.map(c=>(c._historical||c.archived===true)?archiveContractCard(c):contractCard(c)).join(''):`<div class="empty">${archiveMode?'قراردادی در بایگانی با این فیلتر پیدا نشد.':'قراردادی با این فیلتر پیدا نشد.'}</div>`;
 }
+
 
 
 const persianMonths=['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
 function contractAmountNumber(c){return Number(toEn(c?.amount??'').replace(/,/g,''))||0}
-function availableContractYears(){
-  return [...new Set(state.contracts.map(c=>normalizeDate(c.contractDate).split('/')[0]).filter(y=>/^\d{4}$/.test(y)))].sort((a,b)=>Number(b)-Number(a));
+function availableContractYears(target='output'){
+  const pool=target==='financial'?financialContractPool():state.contracts;
+  return [...new Set(pool.map(c=>normalizeDate(c.contractDate).split('/')[0]).filter(y=>/^\d{4}$/.test(y)))].sort((a,b)=>Number(b)-Number(a));
 }
 
 function togglePeriodFilter(target){
@@ -1165,21 +1260,51 @@ function togglePeriodFilter(target){
   btn.textContent=opening?'بستن فیلتر':'باز کردن فیلتر';
 }
 function periodSelectionFor(target){return target==='financial'?financialPeriodSelection:outputPeriodSelection}
-function allPeriodKeys(){return availableContractYears().flatMap(y=>persianMonths.map((_,i)=>`${y}-${String(i+1).padStart(2,'0')}`))}
+function allPeriodKeys(target='output'){return availableContractYears(target).flatMap(y=>persianMonths.map((_,i)=>`${y}-${String(i+1).padStart(2,'0')}`))}
 function renderPeriodPicker(target){
   const box=document.getElementById(target==='financial'?'financialPeriodPicker':'outputPeriodPicker');if(!box)return;
-  const selection=periodSelectionFor(target),years=availableContractYears();
+  const selection=periodSelectionFor(target),years=availableContractYears(target);
   if(!years.length){box.innerHTML='<div class="empty compact-empty">هنوز تاریخ عقد معتبری برای قراردادها ثبت نشده است.</div>';return}
   box.innerHTML=`<div class="period-selection-state">${selection.size?`${toFa(selection.size)} ماه انتخاب شده`:'همه قراردادها'}</div>`+years.map(y=>`<div class="period-year-block"><div class="period-year-title">سال ${toFa(y)}</div><div class="period-months">${persianMonths.map((m,i)=>{const key=`${y}-${String(i+1).padStart(2,'0')}`;return `<label class="period-month ${selection.has(key)?'selected':''}"><input type="checkbox" data-period-check="${target}" value="${key}" ${selection.has(key)?'checked':''}><span>${m}</span></label>`}).join('')}</div></div>`).join('');
   box.querySelectorAll(`[data-period-check="${target}"]`).forEach(ch=>ch.onchange=()=>{if(ch.checked)selection.add(ch.value);else selection.delete(ch.value);target==='financial'?renderFinancial():renderOutputs();});
-  document.querySelectorAll(`[data-period-action][data-period-target="${target}"]`).forEach(btn=>btn.onclick=()=>{if(btn.dataset.periodAction==='all'){allPeriodKeys().forEach(k=>selection.add(k))}else selection.clear();target==='financial'?renderFinancial():renderOutputs();});
+  document.querySelectorAll(`[data-period-action][data-period-target="${target}"]`).forEach(btn=>btn.onclick=()=>{if(btn.dataset.periodAction==='all'){allPeriodKeys(target).forEach(k=>selection.add(k))}else selection.clear();target==='financial'?renderFinancial():renderOutputs();});
 }
 function contractMatchesPeriod(c,selection){
   if(!selection||selection.size===0)return true;const d=normalizeDate(c.contractDate);if(!d)return false;const [y,m]=d.split('/');return selection.has(`${y}-${m}`);
 }
-function periodFilteredContracts(selection){return state.contracts.filter(c=>contractMatchesPeriod(c,selection))}
-function financialEligibleContracts(){return periodFilteredContracts(financialPeriodSelection).filter(c=>effectiveContractStatus(c)!=='terminated')}
+function periodFilteredContracts(selection,pool=state.contracts){return pool.filter(c=>contractMatchesPeriod(c,selection))}
+function financialEligibleContracts(){return periodFilteredContracts(financialPeriodSelection,financialContractPool()).filter(c=>effectiveContractStatus(c)!=='terminated')}
 function sumContractAmounts(list){return list.reduce((s,c)=>s+contractAmountNumber(c),0)}
+function financialContractGroupData(eligible){
+  const selected=[...financialPeriodSelection].sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}));
+  if(selected.length){
+    return selected.map(key=>{
+      const [y,m]=key.split('-');
+      const contracts=eligible.filter(c=>{const d=normalizeDate(c.contractDate);const [cy,cm]=d.split('/');return cy===y&&cm===m});
+      return {key,label:`${persianMonths[Math.max(0,Number(m)-1)]||m} ${toFa(y)}`,contracts};
+    });
+  }
+  const byYear=new Map();
+  eligible.forEach(c=>{const y=normalizeDate(c.contractDate).split('/')[0];if(!/^\d{4}$/.test(y))return;if(!byYear.has(y))byYear.set(y,[]);byYear.get(y).push(c)});
+  return [...byYear.entries()].sort((a,b)=>Number(b[0])-Number(a[0])).map(([y,contracts])=>({key:y,label:`سال ${toFa(y)}`,contracts}));
+}
+function financialContractRow(c){
+  const archived=!!(c._historical||c.archived===true);
+  const status=archived?'بایگانی • خاتمه‌یافته':(statusLabels[effectiveContractStatus(c)]||'—');
+  const code=c.penCode?`کد قلم ${escapeHtml(String(c.penCode))}`:'بدون کد قلم';
+  return `<div class="financial-period-contract-row"><div class="financial-period-contract-main"><strong>${escapeHtml(c.customerName||'بدون نام')}</strong><span>${code}</span></div><div class="financial-period-contract-meta"><span class="financial-period-status ${archived?'archive':''}">${escapeHtml(status)}</span><strong>${optionalMoney(c.amount)}</strong></div></div>`;
+}
+function renderFinancialContractGroups(eligible){
+  const box=document.getElementById('financialContractGroups'),count=document.getElementById('financialContractsCount');if(!box)return;
+  const groups=financialContractGroupData(eligible);
+  if(count)count.textContent=`${toFa(eligible.length)} قرارداد`;
+  if(!groups.length){box.innerHTML='<div class="empty compact-empty">قراردادی در این بازه مالی وجود ندارد.</div>';return}
+  box.innerHTML=groups.map(g=>{
+    const list=[...g.contracts].sort((a,b)=>String(a.contractDate||'').localeCompare(String(b.contractDate||''),'fa',{numeric:true})||String(a.customerName||'').localeCompare(String(b.customerName||''),'fa'));
+    const groupAmount=sumContractAmounts(list);
+    return `<details class="financial-period-group"><summary><span class="financial-period-title"><strong>${escapeHtml(g.label)}</strong><small>${toFa(list.length)} قرارداد</small></span><span class="financial-period-summary-meta"><b>${money(groupAmount)}</b><span class="financial-period-toggle-label">نمایش</span></span></summary><div class="financial-period-contracts">${list.length?list.map(financialContractRow).join(''):'<div class="empty compact-empty">قراردادی در این دوره وجود ندارد.</div>'}</div></details>`;
+  }).join('');
+}
 function renderFinancial(){
   const kpi=document.getElementById('financialKpis'),chart=document.getElementById('financialStatusChart');if(!kpi||!chart)return;
   renderPeriodPicker('financial');
@@ -1199,6 +1324,7 @@ function renderFinancial(){
   const rows=statuses.map(([key,label])=>({key,label,value:sumContractAmounts(eligible.filter(c=>effectiveContractStatus(c)===key))}));
   const max=Math.max(1,...rows.map(r=>r.value));
   chart.innerHTML=rows.map(r=>`<div class="financial-bar-row"><div class="financial-bar-label">${r.label}</div><div class="financial-bar-track"><div class="financial-bar-fill ${r.key}" style="width:${Math.max(r.value?5:0,r.value/max*100)}%"></div></div><strong>${money(r.value)}</strong></div>`).join('');
+  renderFinancialContractGroups(eligible);
 }
 function reportPeriodText(selection){
   if(!selection||selection.size===0)return 'همه قراردادها';
@@ -1265,8 +1391,60 @@ function renderOutputs(){
 }
 function renderLibrary(){const root=document.getElementById('libraryList');if(!root)return;if(!libraryReady){root.innerHTML='<div class="empty">در حال بارگذاری کتابخانه از Firestore...</div>';return}root.innerHTML=state.library.map(cat=>{const expanded=libraryExpandedCats.has(cat.id);const body=cat.items.length?cat.items.map(a=>`<div class="library-activity"><strong>${escapeHtml(a.name)}</strong><span class="score-pill">حجم ${toFa(a.volume)}</span><span class="score-pill">هزینه ${toFa(a.cost)}</span><span class="score-pill hide-mobile">مدت ${toFa(a.duration)}</span><span class="score-pill hide-mobile">ضریب ${toFa(a.score)}</span><span><button class="secondary" data-lib-edit-act="${a.id}" data-cat="${cat.id}">ویرایش</button> <button class="danger" data-lib-del-act="${a.id}" data-cat="${cat.id}">حذف</button></span></div>`).join(''):'<div class="empty compact-empty">فعالیتی در این دسته نیست.</div>';return `<section class="category-card ${expanded?'open':''}"><div class="category-head"><button class="category-toggle" type="button" data-lib-toggle="${cat.id}" aria-expanded="${expanded?'true':'false'}"><div><strong>${escapeHtml(cat.name)}</strong><div class="small muted">${toFa(cat.items.length)} فعالیت</div></div><span class="category-chevron">${expanded?'▾':'▸'}</span></button><div class="category-actions"><button class="secondary" data-lib-add="${cat.id}">+ فعالیت</button><button class="secondary" data-lib-edit-cat="${cat.id}">ویرایش</button><button class="danger" data-lib-del-cat="${cat.id}">حذف</button></div></div><div class="category-body ${expanded?'':'is-hidden'}">${body}</div></section>`}).join('')}
 
+async function fetchCollectionForArchiveCheck(name){
+  const ref=db.collection(name);try{return await ref.get({source:'server'})}catch{return await ref.get()}
+}
+function archiveImportStatusHtml(result){
+  if(!result)return '<div class="muted small">فایل تاییدشده Import را انتخاب کنید؛ تا قبل از تایید نهایی هیچ داده‌ای نوشته نمی‌شود.</div>';
+  const dupCurrent=result.duplicateCurrent||[],dupArchive=result.duplicateArchive||[],invalid=result.invalid||[],skipped=result.knownSkipped||[];
+  return `<div class="archive-dryrun-grid"><div><span>داخل فایل</span><strong>${toFa(result.total)}</strong></div><div><span>قابل ورود</span><strong>${toFa(result.importable.length)}</strong></div><div><span>تکراری جاری</span><strong>${toFa(dupCurrent.length)}</strong></div><div><span>تکراری بایگانی</span><strong>${toFa(dupArchive.length)}</strong></div></div>${dupCurrent.length?`<div class="archive-warning"><b>در قراردادهای جاری وجود دارد و وارد نمی‌شود:</b> ${dupCurrent.map(x=>escapeHtml(x.penCode)).join('، ')}</div>`:''}${dupArchive.length?`<div class="archive-warning"><b>از قبل در بایگانی است:</b> ${dupArchive.map(x=>escapeHtml(x.penCode)).join('، ')}</div>`:''}${invalid.length?`<div class="archive-warning danger"><b>ردیف نامعتبر:</b> ${toFa(invalid.length)} مورد</div>`:''}${skipped.length?`<div class="muted small">موارد از قبل حذف‌شده از فایل تاییدشده: ${skipped.map(escapeHtml).join('، ')}</div>`:''}`;
+}
+function renderArchiveImportStatus(result=null){const box=document.getElementById('archiveImportStatus');if(box)box.innerHTML=archiveImportStatusHtml(result);const btn=document.getElementById('archiveImportConfirmBtn');if(btn)btn.disabled=!result||!result.importable?.length}
+async function performArchiveDryRun(payload){
+  if(!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
+  if(!payload||payload.schema!=='decor-shargh-historical-import-v1'||!Array.isArray(payload.contracts))throw new Error('invalid-import-file');
+  const [currentSnap,archiveSnap]=await Promise.all([fetchCollectionForArchiveCheck(CONTRACT_COLLECTION),fetchCollectionForArchiveCheck(HISTORICAL_CONTRACT_COLLECTION)]);
+  const currentCodes=new Set(currentSnap.docs.map(d=>normalizePenCode(d.data()?.penCode)).filter(Boolean));
+  const archiveCodes=new Set(archiveSnap.docs.map(d=>normalizePenCode(d.data()?.penCode)).filter(Boolean));
+  const seen=new Set(),importable=[],duplicateCurrent=[],duplicateArchive=[],invalid=[];
+  payload.contracts.forEach((raw,index)=>{
+    const penCode=normalizePenCode(raw?.penCode),customerName=String(raw?.customerName||'').trim(),contractDate=normalizeDate(raw?.contractDate||''),endDate=normalizeDate(raw?.endDate||'');
+    if(!penCode||!customerName||!contractDate||!endDate||!Array.isArray(raw?.activities)||!raw.activities.length){invalid.push({index:index+1,penCode:raw?.penCode||''});return}
+    const item={...raw,penCode:String(raw.penCode).trim(),customerName,contractDate,endDate,amount:raw.amount===null||raw.amount===undefined?'':String(raw.amount),activities:raw.activities.map((a,i)=>({...a,id:a.id||`hist_${penCode}_a${i+1}`,baseScore:Number(a.baseScore)||1,progress:100,categoryName:a.categoryName||'بایگانی'}))};
+    if(seen.has(penCode)){invalid.push({index:index+1,penCode:item.penCode,reason:'duplicate-in-file'});return}seen.add(penCode);
+    if(currentCodes.has(penCode)){duplicateCurrent.push(item);return}
+    if(archiveCodes.has(penCode)){duplicateArchive.push(item);return}
+    importable.push(item);
+  });
+  return {payload,total:payload.contracts.length,importable,duplicateCurrent,duplicateArchive,invalid,knownSkipped:Array.isArray(payload.knownSkippedPenCodes)?payload.knownSkippedPenCodes:[]};
+}
+async function handleArchiveImportFile(file){
+  if(!file)return;const status=document.getElementById('archiveImportStatus');if(status)status.innerHTML='<div class="history-loading">در حال بررسی فایل و مقایسه با Firestore...</div>';
+  try{const text=await file.text();const payload=JSON.parse(text);pendingArchiveImport=await performArchiveDryRun(payload);renderArchiveImportStatus(pendingArchiveImport);toast('Dry Run انجام شد؛ هنوز داده‌ای وارد نشده است.')}catch(err){pendingArchiveImport=null;renderArchiveImportStatus();toast(err?.message==='invalid-import-file'?'فایل Import معتبر نیست.':firestoreErrorMessage(err))}
+}
+async function confirmArchiveImport(){
+  if(!pendingArchiveImport||!isAdminRole())return;if(!navigator.onLine)return toast('برای Import نهایی باید اینترنت متصل باشد.');
+  if(!confirm(`${toFa(pendingArchiveImport.importable.length)} قرارداد وارد بایگانی شود؟ قراردادهای جاری تغییر نمی‌کنند.`))return;
+  const btn=document.getElementById('archiveImportConfirmBtn');if(btn){btn.disabled=true;btn.textContent='در حال ورود...'}
+  try{
+    const fresh=await performArchiveDryRun(pendingArchiveImport.payload);pendingArchiveImport=fresh;renderArchiveImportStatus(fresh);
+    if(!fresh.importable.length){toast('مورد جدیدی برای Import باقی نمانده است.');return}
+    const batchId=`archive_${Date.now()}`;let imported=0;
+    for(let i=0;i<fresh.importable.length;i+=300){const batch=db.batch();fresh.importable.slice(i,i+300).forEach(raw=>{const id=archiveDocId(raw),ref=db.collection(HISTORICAL_CONTRACT_COLLECTION).doc(id);const doc=historicalContractDocPayload({...raw,importBatchId:batchId});batch.set(ref,{...doc,completedAt:firebase.firestore.FieldValue.serverTimestamp(),createdAt:firebase.firestore.FieldValue.serverTimestamp(),updatedAt:firebase.firestore.FieldValue.serverTimestamp(),importedAt:firebase.firestore.FieldValue.serverTimestamp(),importedBy:currentAdmin?.uid||'',appVersion:APP_VERSION},{merge:false});imported++});await batch.commit()}
+    writeAuditLog('ورود قراردادهای بایگانی',`${toFa(imported)} قرارداد خاتمه‌یافته از فایل تاییدشده وارد بایگانی شد.`,{kind:'historicalImport',importBatchId:batchId,count:imported});
+    pendingArchiveImport=null;renderArchiveImportStatus();const input=document.getElementById('archiveImportFile');if(input)input.value='';toast(`${toFa(imported)} قرارداد وارد بایگانی شد.`);
+  }catch(err){toast(firestoreErrorMessage(err))}finally{if(btn){btn.disabled=false;btn.textContent='تأیید و ورود به بایگانی'}}
+}
+function wireArchiveImport(){
+  const choose=document.getElementById('archiveImportChooseBtn'),input=document.getElementById('archiveImportFile'),confirmBtn=document.getElementById('archiveImportConfirmBtn');
+  if(choose&&!choose.dataset.bound){choose.dataset.bound='1';choose.onclick=()=>input?.click()}
+  if(input&&!input.dataset.bound){input.dataset.bound='1';input.onchange=()=>handleArchiveImportFile(input.files?.[0])}
+  if(confirmBtn&&!confirmBtn.dataset.bound){confirmBtn.dataset.bound='1';confirmBtn.onclick=confirmArchiveImport}
+  if(document.getElementById('archiveImportStatus')&&!pendingArchiveImport)renderArchiveImportStatus();
+}
+
 function renderAll(){
-  renderHome();renderContracts();
+  renderHome();renderContracts();wireArchiveImport();
   if(isAdminUi())renderLibrary();
   if(isAdminUi()||isProjectManagerUi())renderFinancial();
   if(isProjectManagerUi())renderOutputs();
@@ -1277,7 +1455,7 @@ function switchView(name){
   if(isAdminUi()&&name==='outputs')name='home';
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));
-  if(name==='contracts')renderContracts();
+  if(name==='contracts'){if(!isAdminUi())contractListMode='current';renderContracts();wireArchiveImport();}
   if(name==='library'&&isAdminUi())renderLibrary();
   if(name==='financial'&&(isAdminUi()||isProjectManagerUi()))renderFinancial();
   if(name==='outputs'&&isProjectManagerUi())renderOutputs();
@@ -1285,11 +1463,12 @@ function switchView(name){
 }
 
 
-function openContractForm(c=null){
+function openContractForm(c=null,collection='current'){
   if(!isAdminRole())return;
+  contractFormCollection=collection==='historical'?'historical':'current';
   document.getElementById('contractForm').reset();
   document.getElementById('contractId').value=c?.id||'';
-  document.getElementById('contractModalTitle').textContent=c?'ویرایش قرارداد':'قرارداد جدید';
+  document.getElementById('contractModalTitle').textContent=c?(contractFormCollection==='historical'?'ویرایش قرارداد بایگانی':'ویرایش قرارداد'):'قرارداد جدید';
   contractFormActivities=(c?.activities||[]).map(a=>({...a,progress:c?effectiveActivityProgress(c,a):(Number(a.progress)||0)}));
   contractFormSelectedLibraryActivity=null;
   if(c){customerName.value=c.customerName;penCode.value=c.penCode;contractAmount.value=c.amount;contractDate.value=c.contractDate;endDate.value=c.endDate;compDate.value=c.compDate||'';contractNotes.value=c.notes||''}
@@ -1329,7 +1508,7 @@ function wireContractFormActivityPicker(){
   };
   add.onclick=()=>{
     const selected=contractFormSelectedLibraryActivity;if(!selected)return;
-    contractFormActivities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:0});
+    contractFormActivities.push({id:uid('ca'),libraryId:selected.id,categoryId:selected.categoryId,categoryName:selected.categoryName,name:selected.name,baseScore:selected.score,progress:contractFormCollection==='historical'?100:0});
     renderContractFormActivities();wireContractFormActivityPicker();toast('فعالیت به قرارداد اضافه شد');
   };
 }
@@ -1565,6 +1744,19 @@ function openProjectManagerDetail(id){
   ${issuesSectionHtml(c.id)}
   ${c.notes?`<section class="panel manager-notes" style="box-shadow:none"><h3>توضیحات قرارداد</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
   openModal('detailModal');wireIssueComposer(c.id);
+}
+
+function openArchivedDetail(id){
+  const c=getHistoricalContract(id);if(!c||!isAdminUi())return;stopHistoryListener();stopIssuesListener();
+  document.getElementById('detailTitle').textContent=c.customerName;
+  document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}بایگانی • خاتمه‌یافته`;
+  const sorted=[...(c.activities||[])];
+  document.getElementById('detailContent').innerHTML=`
+  <div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong>۱۰۰٪</strong></div><div class="summary-box compact-summary"><span>وضعیت</span><strong>خاتمه‌یافته</strong></div></div><div class="timing-strip archive-timing-strip"><span>بازه قرارداد</span><strong>${escapeHtml(c.contractDate||'—')} تا ${escapeHtml(c.endDate||'—')}</strong></div></div>
+  <div class="detail-toolbar"><button class="primary" id="editArchivedContractBtn">ویرایش قرارداد بایگانی</button></div>
+  <section class="panel manager-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">همه فعالیت‌های بایگانی ۱۰۰٪ هستند</span></div><div class="manager-activity-list">${sorted.length?sorted.map(a=>managerActivityRow(c,{...a,progress:100})).join(''):'<div class="empty">فعالیتی ثبت نشده است.</div>'}</div></section>
+  ${c.notes?`<section class="panel" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
+  openModal('detailModal');document.getElementById('editArchivedContractBtn')?.addEventListener('click',()=>{closeModal('detailModal');openContractForm(c,'historical')});
 }
 
 function openDetail(id){if(isSupervisorUi())return openSupervisorDetail(id);if(isProjectManagerUi())return openProjectManagerDetail(id);return openAdminDetail(id)}
@@ -1809,7 +2001,7 @@ async function sendUserPasswordReset(uid){
   try{await auth.sendPasswordResetEmail(u.email);toast('ایمیل بازیابی رمز ارسال شد');}catch(err){toast(authErrorMessage(err));}
 }
 
-const BACKUP_COLLECTIONS=['contracts','activityCategories','activityLibrary','appMeta','users'];
+const BACKUP_COLLECTIONS=['contracts','historicalContracts','activityCategories','activityLibrary','appMeta','users'];
 let pendingRestorePayload=null;
 function serializeFirestoreValue(value){
   if(value===null||value===undefined)return value??null;
@@ -1952,15 +2144,18 @@ function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=['siteSu
 function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
 document.addEventListener('click',e=>{
-  const nav=e.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='contracts')dashboardKpiFilter='';switchView(nav.dataset.nav);}
-  const go=e.target.closest('[data-go]');if(go){if(go.dataset.go==='contracts')dashboardKpiFilter='';switchView(go.dataset.go);}
+  const nav=e.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='contracts'){dashboardKpiFilter='';if(isAdminUi())contractListMode='current'}switchView(nav.dataset.nav);}
+  const go=e.target.closest('[data-go]');if(go){if(go.dataset.go==='contracts'){dashboardKpiFilter='';if(isAdminUi())contractListMode='current'}switchView(go.dataset.go);}
   const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);
-  const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c)}
-  const kpi=e.target.closest('[data-kpi]');if(kpi){dashboardKpiFilter=kpi.dataset.kpi||'';clearVisibleContractFilters();switchView('contracts');renderContracts()}
+  const archiveOpen=e.target.closest('[data-open-archive-contract]');if(archiveOpen&&!e.target.closest('button'))openArchivedDetail(archiveOpen.dataset.openArchiveContract);
+  const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c,'current')}
+  const archiveAction=e.target.closest('[data-archive-action]');if(archiveAction){e.stopPropagation();const c=getHistoricalContract(archiveAction.dataset.id);if(!c)return;if(archiveAction.dataset.archiveAction==='view')openArchivedDetail(c.id);if(archiveAction.dataset.archiveAction==='edit')openContractForm(c,'historical')}
+  const mode=e.target.closest('[data-contract-mode]');if(mode&&isAdminUi()){contractListMode=mode.dataset.contractMode==='archive'?'archive':'current';dashboardKpiFilter='';clearVisibleContractFilters();renderContracts()}
+  const kpi=e.target.closest('[data-kpi]');if(kpi){const key=kpi.dataset.kpi||'';clearVisibleContractFilters();if(isAdminUi()&&key==='total'){contractListMode='combined';dashboardKpiFilter=''}else if(isAdminUi()&&key==='completed'){contractListMode='completedAll';dashboardKpiFilter=''}else{contractListMode='current';dashboardKpiFilter=key}switchView('contracts');renderContracts()}
   const priority=e.target.closest('[data-manager-priority]');if(priority&&isProjectManagerUi()){managerPrioritySelection=managerPrioritySelection===priority.dataset.managerPriority?'':priority.dataset.managerPriority;renderManagerPriorityList()}
   const report=e.target.closest('[data-report-type]');if(report&&isProjectManagerUi())openReportPreview(report.dataset.reportType);
 });
-document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole())openContractForm()};
+document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole()){contractListMode='current';openContractForm(null,'current')}};
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
 bindJalaliDateInputs();
 
@@ -1992,14 +2187,21 @@ document.getElementById('contractForm').onsubmit=async e=>{
   try{
     const id=$('contractId').value.trim();
     if(id){
-      const before={...(getContract(id)||{})};
-      const saved=await updateContractRemote(id,data);
-      auditContractEdited(before,saved);
-      scheduleContractViewsRender();
-      toast('اطلاعات قرارداد با موفقیت ویرایش شد');
-      closeModal('contractModal');
-      switchView('contracts');
-      finishSaving();
+      if(contractFormCollection==='historical'){
+        const before={...(getHistoricalContract(id)||{})};
+        const saved=await updateHistoricalContractRemote(id,data);
+        writeAuditLog('ویرایش قرارداد بایگانی',contractChangeSummary(before,saved).join(' | ')||'اطلاعات قرارداد بایگانی بروزرسانی شد.',{contractId:id,contractName:saved.customerName||'',penCode:saved.penCode||'',kind:'historicalContractEdit'});
+        contractListMode='archive';scheduleContractViewsRender();toast('قرارداد بایگانی ویرایش شد');closeModal('contractModal');switchView('contracts');finishSaving();
+      }else{
+        const before={...(getContract(id)||{})};
+        const saved=await updateContractRemote(id,data);
+        auditContractEdited(before,saved);
+        scheduleContractViewsRender();
+        toast('اطلاعات قرارداد با موفقیت ویرایش شد');
+        closeModal('contractModal');
+        switchView('contracts');
+        finishSaving();
+      }
     }else{
       // New contracts are saved local-first. This returns immediately after the Firestore write
       // is queued, so one tap is enough even on a slow or temporarily offline connection.

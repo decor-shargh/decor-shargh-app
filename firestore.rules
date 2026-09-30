@@ -156,6 +156,11 @@ service cloud.firestore {
       }
     }
 
+    match /historicalContracts/{contractId} {
+      allow read: if isAdmin() || isProjectManager();
+      allow create, update, delete: if isAdmin();
+    }
+
     // Immutable audit log. It can be read by Admin, but nobody can edit or delete it.
     match /auditLogs/{logId} {
       allow read: if isAdmin();

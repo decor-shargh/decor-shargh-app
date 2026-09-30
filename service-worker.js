@@ -1,14 +1,14 @@
-const CACHE_NAME = 'decor-shargh-v16-2-20260928-kpi-filters';
+const CACHE_NAME = 'decor-shargh-v17-1-20260930-financial-contract-drilldown';
 const APP_SHELL = [
   './',
   './index.html',
-  './styles.css?v=162',
-  './app.js?v=162',
-  './manifest.webmanifest?v=162',
-  './brand-ui.webp?v=162',
-  './icon-192.png?v=162',
-  './icon-512.png?v=162',
-  './apple-touch-icon.png?v=162',
+  './styles.css?v=171',
+  './app.js?v=171',
+  './manifest.webmanifest?v=171',
+  './brand-ui.webp?v=171',
+  './icon-192.png?v=171',
+  './icon-512.png?v=171',
+  './apple-touch-icon.png?v=171',
   './version.json'
 ];
 
