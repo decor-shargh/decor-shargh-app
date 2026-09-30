@@ -8,7 +8,7 @@ const firebaseConfig={
   measurementId:"G-54J4STYEY4"
 };
 
-const APP_VERSION="17.1.0";
+const APP_VERSION="18.0.0";
 
 let auth=null;
 let db=null;
@@ -201,7 +201,6 @@ function configureRoleUi(){
   const active=document.querySelector('.view.active')?.dataset?.view||'';
   if(isSupervisorUi()&&!['home','contracts'].includes(active))switchView('home');
   if(isProjectManagerUi()&&!['home','contracts','financial','outputs'].includes(active))switchView('home');
-  if(isAdminUi()&&active==='outputs')switchView('home');
 }
 
 function showRoleGate(profile,user){addSystemLog('نمایش پنل نقشِ آماده‌نشده',user?.email||profile?.email||'');
@@ -398,6 +397,7 @@ async function routeUserByProfile(user,profile){
   if(role==='siteSupervisor'&&active){
     currentAdmin=currentUserProfile;startPresenceTracking();stopLibrarySync();state.library=[];showApp();
     if(!contractsUnsub)initContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
+    if(!historicalContractsUnsub)initHistoricalContractsFirestore().catch(err=>toast(firestoreErrorMessage(err)));
     return;
   }
   stopPresenceTracking();currentAdmin=null;stopLibrarySync();stopContractSync();
@@ -514,7 +514,7 @@ function scheduleContractViewsRender(){
     renderHome();
     renderContracts();
     if(isAdminUi()||isProjectManagerUi())renderFinancial();
-    if(isProjectManagerUi()&&document.querySelector('.view.active')?.dataset?.view==='outputs')renderOutputs();
+    if((isAdminUi()||isProjectManagerUi())&&document.querySelector('.view.active')?.dataset?.view==='outputs')renderOutputs();
   });
 }
 function legacyLocalContracts(){try{const s=JSON.parse(localStorage.getItem(STORAGE_KEY));return Array.isArray(s?.contracts)?s.contracts:[]}catch{return []}}
@@ -685,8 +685,14 @@ function historicalContractDocPayload(c){
     categoryName:a.categoryName||'بایگانی',
     name:String(a.name||''),
     baseScore:Number(a.baseScore)||1,
-    progress:100
+    progress:Math.max(0,Math.min(100,Number(a.progress??100)||0))
   })):[];
+  const activityIds=new Set(activities.map(a=>a.id));
+  const progressByActivity=(c.progressByActivity&&typeof c.progressByActivity==='object')
+    ? Object.fromEntries(Object.entries(c.progressByActivity).filter(([k])=>activityIds.has(k)).map(([k,v])=>[k,Math.max(0,Math.min(100,Number(v)||0))]))
+    : {};
+  const temp={...c,activities,progressByActivity};
+  const status=effectiveContractStatus(temp);
   return {
     customerName:String(c.customerName||'').trim(),
     penCode:String(c.penCode||'').trim(),
@@ -695,12 +701,12 @@ function historicalContractDocPayload(c){
     endDate:String(c.endDate||''),
     compDate:String(c.compDate||''),
     notes:String(c.notes||''),
-    status:'completed',
+    status,
     activities,
-    statusReason:'',
-    statusDate:'',
-    completedAt:c.completedAt||null,
-    progressByActivity:{},
+    statusReason:['stopped','terminated'].includes(status)?String(c.statusReason||''):'',
+    statusDate:['stopped','terminated'].includes(status)?String(c.statusDate||''):'',
+    completedAt:status==='completed'?(c.completedAt||null):null,
+    progressByActivity,
     archived:true,
     archiveSource:String(c.archiveSource||c.source||'excel'),
     sourceRows:String(c.sourceRows||''),
@@ -709,8 +715,9 @@ function historicalContractDocPayload(c){
 }
 function normalizePenCode(v=''){return toEn(String(v)).replace(/[^0-9A-Za-z]/g,'').trim()}
 function getHistoricalContract(id){return state.historicalContracts.find(c=>c.id===id)}
-function financialContractPool(){return [...state.contracts,...state.historicalContracts]}
-function homeStatsContractPool(){return isAdminUi()?[...state.contracts,...state.historicalContracts]:[...state.contracts]}
+function allContractPool(){return [...state.contracts,...state.historicalContracts]}
+function financialContractPool(){return allContractPool()}
+function homeStatsContractPool(){return allContractPool()}
 function archiveDocId(c){const code=normalizePenCode(c.penCode);return `hist_${code||uid('archive')}`}
 async function migrateLegacyContractsIfNeeded(){
   // Migration is intentionally PER DEVICE, not controlled by one global Firestore flag.
@@ -776,13 +783,13 @@ async function initContractsFirestore(){
 }
 
 async function initHistoricalContractsFirestore(){
-  if(!db||historicalContractsUnsub||!(isAdminRole()||isProjectManagerRole()))return;
+  if(!db||historicalContractsUnsub||!(isAdminRole()||isProjectManagerRole()||isSiteSupervisor()))return;
   historicalContractsReady=false;
   historicalContractsUnsub=db.collection(HISTORICAL_CONTRACT_COLLECTION).onSnapshot({includeMetadataChanges:true},snap=>{
     state.historicalContracts=snap.docs.map(d=>({id:d.id,...d.data(),_historical:true}));
     historicalContractsReady=true;
     if(appStarted)scheduleContractViewsRender();
-  },err=>{if(isAdminRole()||isProjectManagerRole())toast(firestoreErrorMessage(err))});
+  },err=>{if(isAdminRole()||isProjectManagerRole()||isSiteSupervisor())toast(firestoreErrorMessage(err))});
 }
 async function updateHistoricalContractRemote(id,patch){
   if(!db||!currentAdmin||!isAdminRole())throw Object.assign(new Error('permission-denied'),{code:'permission-denied'});
@@ -923,9 +930,9 @@ async function updateActivityProgressRemote(c,activityId,newProgress,action='man
   const nextEffectiveStatus=effectiveContractStatus(c);
   refreshProgressUi(c,activityId);
 
-  const ref=db.collection(CONTRACT_COLLECTION).doc(c.id),historyRef=ref.collection('history').doc();
-  // Supervisor progress is derived from progressByActivity. Do not require a status-field write
-  // for every tap; this keeps old and new rules compatible and makes offline writes much safer.
+  const historical=!!(c?._historical||c?.archived===true);
+  const collectionName=historical?HISTORICAL_CONTRACT_COLLECTION:CONTRACT_COLLECTION;
+  const ref=db.collection(collectionName).doc(c.id);
   const patch={
     [`progressByActivity.${activityId}`]:nextProgress,
     updatedAt:firebase.firestore.FieldValue.serverTimestamp(),updatedBy:currentAdmin.uid||'',appVersion:APP_VERSION
@@ -941,11 +948,15 @@ async function updateActivityProgressRemote(c,activityId,newProgress,action='man
     toast(firestoreErrorMessage(err));
   });
 
-  const historyData={contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION};
-  // Auxiliary logging must never block the actual progress save.
-  historyRef.set(historyData).catch(()=>{});
+  // Operational contracts retain their detailed history. Historical imports use the immutable
+  // audit log for progress changes so no migration or nested historical subcollection is required.
+  if(!historical){
+    const historyRef=ref.collection('history').doc();
+    const historyData={contractId:c.id,activityId:activity.id,activityName:String(activity.name||''),oldProgress,newProgress:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,action:action==='done'?'done':'manual',changedByUid:currentAdmin.uid||'',changedByEmail:currentAdmin.email||'',changedByName:currentAdmin.name||'',changedByRole:currentRole(),changedAt:firebase.firestore.FieldValue.serverTimestamp(),changedAtClient:new Date().toISOString(),appVersion:APP_VERSION};
+    historyRef.set(historyData).catch(()=>{});
+  }
   const statusChangeText=previousEffectiveStatus!==nextEffectiveStatus?` وضعیت قرارداد از «${statusLabels[previousEffectiveStatus]||previousEffectiveStatus}» به «${statusLabels[nextEffectiveStatus]||nextEffectiveStatus}» تغییر کرد.`:'';
-  writeAuditLog(action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.${statusChangeText}`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,kind:action==='done'?'activityDone':'progress'});
+  writeAuditLog(action==='done'?'انجام شدن فعالیت':'ثبت پیشرفت',`فعالیت «${activity.name||'فعالیت'}» از ${toFa(oldProgress)}٪ به ${toFa(nextProgress)}٪ تغییر کرد.${statusChangeText}`,{contractId:c.id,contractName:c.customerName||'',penCode:c.penCode||'',activityId:activity.id,activityName:activity.name||'',oldValue:oldProgress,newValue:nextProgress,oldStatus:previousEffectiveStatus,newStatus:nextEffectiveStatus,kind:historical?'historicalProgress':(action==='done'?'activityDone':'progress')});
   return {saved:c,changed:true,pending:true,promise:primaryWrite};
 }
 
@@ -1029,13 +1040,12 @@ function effectiveActivityProgress(c,a){
   if(map&&Object.prototype.hasOwnProperty.call(map,a.id))return Math.max(0,Math.min(100,Number(map[a.id])||0));
   return Math.max(0,Math.min(100,Number(a?.progress)||0));
 }
-function contractProgress(c){if(c?.archived===true||c?._historical===true)return 100;if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+(effectiveActivityProgress(c,a)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
+function contractProgress(c){if(!c.activities?.length)return 0;const total=c.activities.reduce((s,a)=>s+(Number(a.baseScore)||0),0);if(!total)return 0;return +c.activities.reduce((s,a)=>s+(effectiveActivityProgress(c,a)*(Number(a.baseScore)||0)/total),0).toFixed(1)}
 function activityWeight(c,a){const total=c.activities.reduce((s,x)=>s+(Number(x.baseScore)||0),0);return total?+(a.baseScore/total*100).toFixed(1):0}
 function hasAnyContractProgress(c){return (c.activities||[]).some(a=>effectiveActivityProgress(c,a)>0)}
 function allContractActivitiesDone(c){return !!c.activities?.length&&c.activities.every(a=>effectiveActivityProgress(c,a)===100)}
 function automaticContractStatus(c){if(allContractActivitiesDone(c))return 'completed';return hasAnyContractProgress(c)?'inProgress':'pendingStart'}
 function effectiveContractStatus(c){
-  if(c?.archived===true||c?._historical===true)return 'completed';
   const raw=String(c?.status||'');
   // Completion is never manual: when every activity reaches 100%, it wins automatically.
   if(allContractActivitiesDone(c||{}))return 'completed';
@@ -1064,7 +1074,7 @@ function stoppedContractInfo(c){
   if(since!==null){const days=Math.max(0,-since);duration=days===0?'امروز متوقف شده':`${toFa(days)} روز متوقف`;}
   return `<div class="stop-card-info"><span><b>دلیل توقف:</b> ${escapeHtml(reason)}</span><span>${escapeHtml(duration)}</span></div>`;
 }
-function unfinishedProjectContracts(){return state.contracts.filter(c=>['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c))).sort(contractEndSort)}
+function unfinishedProjectContracts(){return allContractPool().filter(c=>['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c))).sort(contractEndSort)}
 
 function contractIssueBadge(c){
   const count=Math.max(0,Number(c?.openIssueCount)||0),latest=c?.latestOpenIssue;
@@ -1099,20 +1109,36 @@ ${contractIssueBadge(c)}
 <div class="manager-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>مشاهده جزئیات ←</span></div>
 </article>`}
 
-function archiveContractCard(c){const p=contractProgress(c);const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ۱۰۰٪</span>`).join('')||'<span class="muted small">فعالیتی ثبت نشده است</span>';return `<article class="contract-card archive-contract-card completed" data-open-archive-contract="${c.id}">
+function archiveContractCard(c){
+  const p=contractProgress(c),ds=dueState(c),st=effectiveContractStatus(c);
+  if(isSupervisorUi())return `<article class="contract-card supervisor-contract-card ${statusClass(c)}" data-open-archive-contract="${c.id}">
+<div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="supervisor-card-status">${escapeHtml(statusLabels[st]||'')}</div></div>
+<div class="supervisor-contract-due badge ${ds.key}">${escapeHtml(ds.text)}</div>
+<div class="progress-row supervisor-progress-row"><span class="small">پیشرفت کل</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
+<div class="supervisor-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>${optionalMoney(c.amount)}</span></div>
+</article>`;
+  if(isProjectManagerUi())return `<article class="contract-card manager-contract-card ${statusClass(c)}" data-open-archive-contract="${c.id}">
 <div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
-<div class="contract-meta"><span class="badge completed">خاتمه‌یافته</span><span class="badge archive-badge">بایگانی</span></div>
+<div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge">${escapeHtml(statusLabels[st]||'')}</span></div>
+<div class="progress-row"><span class="small">پیشرفت کل</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
+<div class="manager-card-foot"><span>${toFa((c.activities||[]).length)} فعالیت</span><span>مشاهده جزئیات ←</span></div>
+</article>`;
+  const acts=(c.activities||[]).map(a=>`<span class="act-chip">${escapeHtml(a.name)} — ${toFa(effectiveActivityProgress(c,a))}٪</span>`).join('')||'<span class="muted small">فعالیتی ثبت نشده است</span>';
+  return `<article class="contract-card archive-contract-card ${statusClass(c)}" data-open-archive-contract="${c.id}">
+<div class="contract-top"><div><div class="contract-title">${escapeHtml(c.customerName)}</div>${c.penCode?`<div class="code">کد قلم: ${escapeHtml(c.penCode)}</div>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
+<div class="contract-meta"><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span><span class="badge archive-badge">آرشیو داده</span></div>
 <div class="progress-row"><span class="small">پیشرفت</span><div class="progress-track"><div class="progress-fill" style="width:${p}%"></div></div><strong>${toFa(p)}٪</strong></div>
 <div class="activities-mini">${acts}</div>
 <div class="card-actions"><button class="secondary" data-archive-action="view" data-id="${c.id}">مشاهده</button><button class="secondary" data-archive-action="edit" data-id="${c.id}">ویرایش</button></div>
-</article>`}
+</article>`;
+}
 
 function contractCard(c){return isSupervisorUi()?supervisorContractCard(c):isProjectManagerUi()?projectManagerContractCard(c):adminContractCard(c)}
 
 
 function managerPriorityCard(c){
-  const p=contractProgress(c),ds=dueState(c),st=effectiveContractStatus(c);
-  return `<article class="manager-priority-card ${ds.key}" data-open-contract="${c.id}">
+  const p=contractProgress(c),ds=dueState(c),st=effectiveContractStatus(c),openAttr=(c._historical||c.archived===true)?`data-open-archive-contract="${c.id}"`:`data-open-contract="${c.id}"`;
+  return `<article class="manager-priority-card ${ds.key}" ${openAttr}>
     <div class="manager-priority-top"><div><strong>${escapeHtml(c.customerName)}</strong>${c.penCode?`<span>کد ${escapeHtml(c.penCode)}</span>`:''}</div><div class="amount">${optionalMoney(c.amount)}</div></div>
     <div class="manager-priority-meta"><span class="badge">${escapeHtml(statusLabels[st]||'')}</span><span class="badge ${ds.key}">${escapeHtml(ds.text)}</span></div>
     ${stoppedContractInfo(c)}${contractIssueBadge(c)}
@@ -1123,7 +1149,7 @@ function renderManagerPriorityList(){
   const box=document.getElementById('managerPriorityList');if(!box)return;
   document.querySelectorAll('[data-manager-priority]').forEach(b=>b.classList.toggle('active',b.dataset.managerPriority===managerPrioritySelection));
   if(!managerPrioritySelection){box.innerHTML='';return}
-  const arr=state.contracts.filter(c=>{
+  const arr=allContractPool().filter(c=>{
     const k=dueState(c).key;
     return managerPrioritySelection==='critical'?['critical','overdue'].includes(k):k==='near';
   }).sort(contractEndSort);
@@ -1131,7 +1157,7 @@ function renderManagerPriorityList(){
 }
 
 function renderHome(){
-  const operational=[...state.contracts];
+  const operational=allContractPool().filter(c=>effectiveContractStatus(c)!=='completed');
   const all=homeStatsContractPool();
   const unfinished=unfinishedProjectContracts();
   const near=all.filter(c=>dueState(c).key==='near').sort(contractEndSort);
@@ -1171,7 +1197,8 @@ function renderHome(){
     document.getElementById('attentionList').innerHTML=attention.length?attention.map(c=>{
       const ds=dueState(c),stopped=effectiveContractStatus(c)==='stopped';
       const statusBadge=stopped?'<span class="badge stopped">متوقف</span>':`<span class="badge ${ds.key}">${escapeHtml(ds.text)}</span>`;
-      return `<div class="attention-item" data-open-contract="${c.id}"><div><strong>${escapeHtml(c.customerName)}</strong><div class="attention-progress muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}<span>پیشرفت ${toFa(contractProgress(c))}٪</span></div>${stopped?stoppedContractInfo(c):''}</div><div class="attention-badges">${statusBadge}${stopped?`<span class="badge ${ds.key}">${escapeHtml(ds.text)}</span>`:''}</div></div>`;
+      const openAttr=(c._historical||c.archived===true)?`data-open-archive-contract="${c.id}"`:`data-open-contract="${c.id}"`;
+      return `<div class="attention-item" ${openAttr}><div><strong>${escapeHtml(c.customerName)}</strong><div class="attention-progress muted">${c.penCode?`کد ${escapeHtml(c.penCode)} • `:''}<span>پیشرفت ${toFa(contractProgress(c))}٪</span></div>${stopped?stoppedContractInfo(c):''}</div><div class="attention-badges">${statusBadge}${stopped?`<span class="badge ${ds.key}">${escapeHtml(ds.text)}</span>`:''}</div></div>`;
     }).join(''):'<div class="empty">مورد نیازمند توجهی وجود ندارد.</div>';
   }
   renderCharts(unfinished);
@@ -1217,28 +1244,32 @@ function clearVisibleContractFilters(){
 }
 
 function renderContracts(){
-  const archiveMode=isAdminUi()&&contractListMode==='archive';
-  const combinedMode=isAdminUi()&&contractListMode==='combined';
-  const completedAllMode=isAdminUi()&&contractListMode==='completedAll';
-  const modeTabs=document.getElementById('contractModeTabs');if(modeTabs)modeTabs.classList.toggle('is-hidden',!isAdminUi());
-  document.querySelectorAll('[data-contract-mode]').forEach(b=>b.classList.toggle('active',!combinedMode&&!completedAllMode&&b.dataset.contractMode===(archiveMode?'archive':'current')));
-  const archiveCount=document.getElementById('archiveCount');if(archiveCount)archiveCount.textContent=toFa(state.historicalContracts.length);
-  const importPanel=document.getElementById('archiveImportPanel');if(importPanel)importPanel.classList.toggle('is-hidden',!archiveMode);
-  const newBtn=document.getElementById('newContractBtn');if(newBtn)newBtn.classList.toggle('is-hidden',archiveMode||combinedMode||completedAllMode||!isAdminUi());
-  const heading=document.getElementById('contractsViewTitle');if(heading)heading.textContent=archiveMode?'بایگانی قراردادها':combinedMode?'کل قراردادها':completedAllMode?'قراردادهای خاتمه‌یافته':'قراردادها';
-  let arr=archiveMode?[...state.historicalContracts]:combinedMode?[...state.contracts,...state.historicalContracts]:completedAllMode?[...state.contracts,...state.historicalContracts].filter(c=>effectiveContractStatus(c)==='completed'):[...state.contracts];
+  const archiveMode=contractListMode==='archive';
+  const combinedMode=contractListMode==='combined';
+  const modeTabs=document.getElementById('contractModeTabs');if(modeTabs)modeTabs.classList.remove('is-hidden');
+  document.querySelectorAll('[data-contract-mode]').forEach(b=>b.classList.toggle('active',!combinedMode&&b.dataset.contractMode===(archiveMode?'archive':'current')));
+  const pool=allContractPool();
+  const completedPool=pool.filter(c=>effectiveContractStatus(c)==='completed');
+  const unfinishedPool=pool.filter(c=>effectiveContractStatus(c)!=='completed');
+  const archiveCount=document.getElementById('archiveCount');if(archiveCount)archiveCount.textContent=toFa(completedPool.length);
+  const unfinishedCount=document.getElementById('unfinishedCount');if(unfinishedCount)unfinishedCount.textContent=toFa(unfinishedPool.length);
+  const importPanel=document.getElementById('archiveImportPanel');if(importPanel)importPanel.classList.toggle('is-hidden',!(archiveMode&&isAdminUi()));
+  const newBtn=document.getElementById('newContractBtn');if(newBtn)newBtn.classList.toggle('is-hidden',archiveMode||combinedMode||!isAdminUi());
+  const heading=document.getElementById('contractsViewTitle');if(heading)heading.textContent=archiveMode?'قراردادهای خاتمه‌یافته':combinedMode?'کل قراردادها':'قراردادهای خاتمه‌نیافته';
+  let arr=archiveMode?[...completedPool]:combinedMode?[...pool]:[...unfinishedPool];
   arr=arr.sort(contractListSort);
   const name=document.getElementById('filterCustomer').value.trim();
   const year=normalizeYear(document.getElementById('filterYear').value);
   const month=document.getElementById('filterMonth').value;
   const st=document.getElementById('filterStatus').value;
-  if(!archiveMode&&!combinedMode&&!completedAllMode&&dashboardKpiFilter)arr=arr.filter(c=>contractMatchesDashboardKpi(c,dashboardKpiFilter));
+  if(!archiveMode&&!combinedMode&&dashboardKpiFilter)arr=arr.filter(c=>contractMatchesDashboardKpi(c,dashboardKpiFilter));
   if(name)arr=arr.filter(c=>String(c.customerName||'').includes(name)||String(c.penCode||'').includes(toEn(name)));
   if(st)arr=arr.filter(c=>effectiveContractStatus(c)===st);
   if(year)arr=arr.filter(c=>normalizeDate(c.contractDate).startsWith(`${year}/`));
   if(month)arr=arr.filter(c=>{const parts=normalizeDate(c.contractDate).split('/');return parts[1]===month});
   const list=document.getElementById('contractsList');
-  list.innerHTML=arr.length?arr.map(c=>(c._historical||c.archived===true)?archiveContractCard(c):contractCard(c)).join(''):`<div class="empty">${archiveMode?'قراردادی در بایگانی با این فیلتر پیدا نشد.':'قراردادی با این فیلتر پیدا نشد.'}</div>`;
+  const emptyText=archiveMode?'قرارداد خاتمه‌یافته‌ای با این فیلتر پیدا نشد.':combinedMode?'قراردادی با این فیلتر پیدا نشد.':'قرارداد خاتمه‌نیافته‌ای با این فیلتر پیدا نشد.';
+  list.innerHTML=arr.length?arr.map(c=>(c._historical||c.archived===true)?archiveContractCard(c):contractCard(c)).join(''):`<div class="empty">${emptyText}</div>`;
 }
 
 
@@ -1246,7 +1277,7 @@ function renderContracts(){
 const persianMonths=['فروردین','اردیبهشت','خرداد','تیر','مرداد','شهریور','مهر','آبان','آذر','دی','بهمن','اسفند'];
 function contractAmountNumber(c){return Number(toEn(c?.amount??'').replace(/,/g,''))||0}
 function availableContractYears(target='output'){
-  const pool=target==='financial'?financialContractPool():state.contracts;
+  const pool=(target==='financial'||target==='output')?financialContractPool():state.contracts;
   return [...new Set(pool.map(c=>normalizeDate(c.contractDate).split('/')[0]).filter(y=>/^\d{4}$/.test(y)))].sort((a,b)=>Number(b)-Number(a));
 }
 
@@ -1265,10 +1296,19 @@ function renderPeriodPicker(target){
   const box=document.getElementById(target==='financial'?'financialPeriodPicker':'outputPeriodPicker');if(!box)return;
   const selection=periodSelectionFor(target),years=availableContractYears(target);
   if(!years.length){box.innerHTML='<div class="empty compact-empty">هنوز تاریخ عقد معتبری برای قراردادها ثبت نشده است.</div>';return}
-  box.innerHTML=`<div class="period-selection-state">${selection.size?`${toFa(selection.size)} ماه انتخاب شده`:'همه قراردادها'}</div>`+years.map(y=>`<div class="period-year-block"><div class="period-year-title">سال ${toFa(y)}</div><div class="period-months">${persianMonths.map((m,i)=>{const key=`${y}-${String(i+1).padStart(2,'0')}`;return `<label class="period-month ${selection.has(key)?'selected':''}"><input type="checkbox" data-period-check="${target}" value="${key}" ${selection.has(key)?'checked':''}><span>${m}</span></label>`}).join('')}</div></div>`).join('');
+  box.innerHTML=`<div class="period-selection-state">${selection.size?`${toFa(selection.size)} ماه انتخاب شده`:'همه قراردادها'}</div>`+years.map(y=>{
+    const yearKeys=persianMonths.map((_,i)=>`${y}-${String(i+1).padStart(2,'0')}`);
+    const wholeYearSelected=yearKeys.every(k=>selection.has(k));
+    const yearAction=target==='financial'?`<button type="button" class="period-year-toggle ${wholeYearSelected?'selected':''}" data-period-year-toggle="${y}" data-period-target="${target}">${wholeYearSelected?'لغو کل سال':'انتخاب کل سال'}</button>`:'';
+    return `<div class="period-year-block"><div class="period-year-title"><span>سال ${toFa(y)}</span>${yearAction}</div><div class="period-months">${persianMonths.map((m,i)=>{const key=`${y}-${String(i+1).padStart(2,'0')}`;return `<label class="period-month ${selection.has(key)?'selected':''}"><input type="checkbox" data-period-check="${target}" value="${key}" ${selection.has(key)?'checked':''}><span>${m}</span></label>`}).join('')}</div></div>`;
+  }).join('');
   box.querySelectorAll(`[data-period-check="${target}"]`).forEach(ch=>ch.onchange=()=>{if(ch.checked)selection.add(ch.value);else selection.delete(ch.value);target==='financial'?renderFinancial():renderOutputs();});
+  box.querySelectorAll(`[data-period-year-toggle][data-period-target="${target}"]`).forEach(btn=>btn.onclick=()=>{
+    const y=btn.dataset.periodYearToggle;const keys=persianMonths.map((_,i)=>`${y}-${String(i+1).padStart(2,'0')}`);const allSelected=keys.every(k=>selection.has(k));keys.forEach(k=>allSelected?selection.delete(k):selection.add(k));target==='financial'?renderFinancial():renderOutputs();
+  });
   document.querySelectorAll(`[data-period-action][data-period-target="${target}"]`).forEach(btn=>btn.onclick=()=>{if(btn.dataset.periodAction==='all'){allPeriodKeys(target).forEach(k=>selection.add(k))}else selection.clear();target==='financial'?renderFinancial():renderOutputs();});
 }
+
 function contractMatchesPeriod(c,selection){
   if(!selection||selection.size===0)return true;const d=normalizeDate(c.contractDate);if(!d)return false;const [y,m]=d.split('/');return selection.has(`${y}-${m}`);
 }
@@ -1329,11 +1369,12 @@ function renderFinancial(){
 function reportPeriodText(selection){
   if(!selection||selection.size===0)return 'همه قراردادها';
   const grouped={};[...selection].sort().forEach(k=>{const [y,m]=k.split('-');(grouped[y]||(grouped[y]=[])).push(persianMonths[Number(m)-1])});
-  return Object.entries(grouped).map(([y,months])=>`${toFa(y)}: ${months.join('، ')}`).join(' | ');
+  return Object.entries(grouped).map(([y,months])=>months.length===12?`کل سال ${toFa(y)}`:`${toFa(y)}: ${months.join('، ')}`).join(' | ');
 }
 function reportDateText(){try{return new Intl.DateTimeFormat('fa-IR-u-ca-persian',{year:'numeric',month:'long',day:'numeric'}).format(new Date())}catch{return new Date().toLocaleDateString('fa-IR')}}
+function reportPenCode(c){return c?.penCode?escapeHtml(String(c.penCode)):'—'}
 function reportContractRows(list){
-  return list.map(c=>{const ds=dueState(c);return `<tr><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(statusLabels[effectiveContractStatus(c)]||'—')}</td><td>${toFa(contractProgress(c))}٪</td><td>${escapeHtml(ds.text||'—')}</td><td>${optionalMoney(c.amount)}</td></tr>`}).join('');
+  return list.map(c=>{const ds=dueState(c);return `<tr><td>${reportPenCode(c)}</td><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(statusLabels[effectiveContractStatus(c)]||'—')}</td><td>${toFa(contractProgress(c))}٪</td><td>${escapeHtml(ds.text||'—')}</td><td>${optionalMoney(c.amount)}</td></tr>`}).join('');
 }
 async function loadIssuesForReport(contracts){
   const results=[];
@@ -1346,23 +1387,51 @@ async function loadIssuesForReport(contracts){
 }
 function daysSinceIssue(i){const ms=issueSortMs(i);if(!ms)return null;return Math.max(0,Math.floor((Date.now()-ms)/86400000))}
 async function buildReportPayload(type){
-  const base=periodFilteredContracts(outputPeriodSelection).sort(contractListSort);
-  const titles={critical:'گزارش قراردادهای بحرانی',near:'گزارش قراردادهای نزدیک سررسید',issues:'گزارش مشکلات باز',summary:'گزارش خلاصه وضعیت همه قراردادها'};
+  const financialTypes=new Set(['financialSummary','financialMonthly','financialDetails']);
+  const isFinancialReport=financialTypes.has(type);
+  const base=(isFinancialReport
+    ? periodFilteredContracts(outputPeriodSelection,financialContractPool()).filter(c=>effectiveContractStatus(c)!=='terminated')
+    : periodFilteredContracts(outputPeriodSelection,state.contracts)
+  ).sort(contractListSort);
+  const titles={
+    critical:'گزارش قراردادهای بحرانی',near:'گزارش قراردادهای نزدیک سررسید',issues:'گزارش مشکلات باز',summary:'گزارش خلاصه وضعیت همه قراردادها',
+    financialSummary:'گزارش مالی خلاصه',financialMonthly:'گزارش مالی ماهانه',financialDetails:'ریز قراردادهای مالی'
+  };
   const title=titles[type]||'گزارش';let content='',count=0,totalAmount=0;
   if(type==='issues'){
     const issueRows=await loadIssuesForReport(base);count=issueRows.length;
     const uniqueContracts=[...new Map(issueRows.map(x=>[x.contract.id,x.contract])).values()];totalAmount=sumContractAmounts(uniqueContracts);
-    content=issueRows.length?`<table class="report-table"><thead><tr><th>قرارداد</th><th>مشکل</th><th>مدت باز بودن</th><th>وضعیت زمانی</th><th>مبلغ قرارداد</th></tr></thead><tbody>${issueRows.map(({contract:c,issue:i})=>{const d=daysSinceIssue(i);return `<tr><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(i.text||'')}</td><td>${d===null?'—':d===0?'امروز':`${toFa(d)} روز`}</td><td>${escapeHtml(dueState(c).text||'—')}</td><td>${optionalMoney(c.amount)}</td></tr>`}).join('')}</tbody></table>`:'<div class="report-empty">مشکل بازی در این بازه وجود ندارد.</div>';
+    content=issueRows.length?`<table class="report-table"><thead><tr><th>کد قلم</th><th>قرارداد</th><th>مشکل</th><th>مدت باز بودن</th><th>وضعیت زمانی</th><th>مبلغ قرارداد</th></tr></thead><tbody>${issueRows.map(({contract:c,issue:i})=>{const d=daysSinceIssue(i);return `<tr><td>${reportPenCode(c)}</td><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(i.text||'')}</td><td>${d===null?'—':d===0?'امروز':`${toFa(d)} روز`}</td><td>${escapeHtml(dueState(c).text||'—')}</td><td>${optionalMoney(c.amount)}</td></tr>`}).join('')}</tbody></table>`:'<div class="report-empty">مشکل بازی در این بازه وجود ندارد.</div>';
+  }else if(type==='financialSummary'){
+    count=base.length;totalAmount=sumContractAmounts(base);
+    const unfinished=base.filter(c=>['pendingStart','inProgress','stopped'].includes(effectiveContractStatus(c)));
+    const completed=base.filter(c=>effectiveContractStatus(c)==='completed');
+    const stopped=base.filter(c=>effectiveContractStatus(c)==='stopped');
+    const earned=Math.round(base.reduce((sum,c)=>sum+contractAmountNumber(c)*contractProgress(c)/100,0));
+    const avg=base.length?Math.round(totalAmount/base.length):0;
+    const statuses=[['در انتظار شروع','pendingStart'],['در حال انجام','inProgress'],['متوقف','stopped'],['خاتمه‌یافته','completed']];
+    content=`<div class="report-kpis"><div><span>خاتمه‌نیافته</span><strong>${money(sumContractAmounts(unfinished))}</strong></div><div><span>خاتمه‌یافته</span><strong>${money(sumContractAmounts(completed))}</strong></div><div><span>متوقف</span><strong>${money(sumContractAmounts(stopped))}</strong></div><div><span>ارزش تحقق‌یافته</span><strong>${money(earned)}</strong></div><div><span>میانگین قرارداد</span><strong>${money(avg)}</strong></div></div><table class="report-table"><thead><tr><th>وضعیت</th><th>تعداد قرارداد</th><th>جمع مبلغ</th></tr></thead><tbody>${statuses.map(([label,key])=>{const list=base.filter(c=>effectiveContractStatus(c)===key);return `<tr><td>${label}</td><td>${toFa(list.length)}</td><td>${money(sumContractAmounts(list))}</td></tr>`}).join('')}</tbody></table>`;
+  }else if(type==='financialMonthly'){
+    count=base.length;totalAmount=sumContractAmounts(base);
+    const groups=new Map();
+    base.forEach(c=>{const d=normalizeDate(c.contractDate);const [y,m]=d.split('/');if(!/^\d{4}$/.test(y)||!/^\d{2}$/.test(m))return;const key=`${y}-${m}`;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(c)});
+    const sections=[...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0],undefined,{numeric:true})).map(([key,list])=>{const [y,m]=key.split('-');const label=`${persianMonths[Number(m)-1]||m} ${toFa(y)}`;return `<section class="report-month-section"><h3>${escapeHtml(label)} — ${toFa(list.length)} قرارداد — ${money(sumContractAmounts(list))}</h3><table class="report-table"><thead><tr><th>کد قلم</th><th>قرارداد</th><th>وضعیت</th><th>مبلغ قرارداد</th></tr></thead><tbody>${list.sort(contractListSort).map(c=>`<tr><td>${reportPenCode(c)}</td><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(statusLabels[effectiveContractStatus(c)]||'—')}</td><td>${optionalMoney(c.amount)}</td></tr>`).join('')}</tbody></table></section>`}).join('');
+    content=sections||'<div class="report-empty">قرارداد مالی در این بازه وجود ندارد.</div>';
+  }else if(type==='financialDetails'){
+    count=base.length;totalAmount=sumContractAmounts(base);
+    content=base.length?`<table class="report-table"><thead><tr><th>کد قلم</th><th>قرارداد</th><th>تاریخ عقد</th><th>وضعیت</th><th>پیشرفت</th><th>مبلغ قرارداد</th></tr></thead><tbody>${base.map(c=>`<tr><td>${reportPenCode(c)}</td><td>${escapeHtml(c.customerName||'—')}</td><td>${escapeHtml(c.contractDate||'—')}</td><td>${escapeHtml(statusLabels[effectiveContractStatus(c)]||'—')}</td><td>${toFa(contractProgress(c))}٪</td><td>${optionalMoney(c.amount)}</td></tr>`).join('')}</tbody></table>`:'<div class="report-empty">قرارداد مالی در این بازه وجود ندارد.</div>';
   }else{
     let list=base;if(type==='critical')list=base.filter(c=>['critical','overdue'].includes(dueState(c).key));if(type==='near')list=base.filter(c=>dueState(c).key==='near');
     count=list.length;totalAmount=sumContractAmounts(list);
-    content=list.length?`<table class="report-table"><thead><tr><th>قرارداد</th><th>وضعیت</th><th>پیشرفت</th><th>وضعیت زمانی</th><th>مبلغ قرارداد</th></tr></thead><tbody>${reportContractRows(list)}</tbody></table>`:'<div class="report-empty">قراردادی در این گزارش وجود ندارد.</div>';
+    content=list.length?`<table class="report-table"><thead><tr><th>کد قلم</th><th>قرارداد</th><th>وضعیت</th><th>پیشرفت</th><th>وضعیت زمانی</th><th>مبلغ قرارداد</th></tr></thead><tbody>${reportContractRows(list)}</tbody></table>`:'<div class="report-empty">قراردادی در این گزارش وجود ندارد.</div>';
   }
-  const html=`<div class="report-sheet" dir="rtl"><div class="report-brand"><img src="brand-ui.webp" alt="Decor Shargh"><div><strong>Decor Shargh</strong><span>گزارش مدیریتی</span></div></div><h2>${title}</h2><div class="report-meta"><span>بازه: ${escapeHtml(reportPeriodText(outputPeriodSelection))}</span><span>تاریخ تهیه: ${escapeHtml(reportDateText())}</span></div><div class="report-kpis"><div><span>تعداد</span><strong>${toFa(count)}</strong></div><div><span>جمع مبلغ قراردادها</span><strong>${money(totalAmount)}</strong></div></div>${content}<div class="report-footer">Decor Shargh • تهیه‌شده از سامانه مدیریت قراردادها</div></div>`;
+  const reportKind=isFinancialReport?'گزارش مالی':'گزارش مدیریتی';
+  const html=`<div class="report-sheet" dir="rtl"><div class="report-brand"><img src="brand-ui.webp" alt="Decor Shargh"><div><strong>Decor Shargh</strong><span>${reportKind}</span></div></div><h2>${title}</h2><div class="report-meta"><span>بازه: ${escapeHtml(reportPeriodText(outputPeriodSelection))}</span><span>تاریخ تهیه: ${escapeHtml(reportDateText())}</span></div><div class="report-kpis"><div><span>تعداد</span><strong>${toFa(count)}</strong></div><div><span>جمع مبلغ قراردادها</span><strong>${money(totalAmount)}</strong></div></div>${content}<div class="report-footer">Decor Shargh • تهیه‌شده از سامانه مدیریت قراردادها</div></div>`;
   return {type,title,html,fileName:`Decor-Shargh-${type}-${Date.now()}.pdf`};
 }
+
 async function openReportPreview(type){
-  if(!isProjectManagerUi())return;currentReportType=type;const panel=document.getElementById('reportPreviewPanel'),box=document.getElementById('reportPreview'),title=document.getElementById('reportPreviewTitle');panel?.classList.remove('is-hidden');if(box)box.innerHTML='<div class="history-loading">در حال آماده‌سازی گزارش...</div>';
+  if(!(isProjectManagerUi()||isAdminUi()))return;currentReportType=type;const panel=document.getElementById('reportPreviewPanel'),box=document.getElementById('reportPreview'),title=document.getElementById('reportPreviewTitle');panel?.classList.remove('is-hidden');if(box)box.innerHTML='<div class="history-loading">در حال آماده‌سازی گزارش...</div>';
   try{currentReportPayload=await buildReportPayload(type);if(title)title.textContent=currentReportPayload.title;if(box)box.innerHTML=currentReportPayload.html;panel?.scrollIntoView({behavior:'smooth',block:'start'})}catch(err){if(box)box.innerHTML=`<div class="empty">${escapeHtml(firestoreErrorMessage(err))}</div>`}
 }
 function loadExternalScript(src){return new Promise((resolve,reject)=>{const found=[...document.scripts].find(x=>x.src===src);if(found){if(found.dataset.loaded==='1')return resolve();found.addEventListener('load',resolve,{once:true});found.addEventListener('error',reject,{once:true});return}const sc=document.createElement('script');sc.src=src;sc.async=true;sc.onload=()=>{sc.dataset.loaded='1';resolve()};sc.onerror=reject;document.head.appendChild(sc)})}
@@ -1447,18 +1516,17 @@ function renderAll(){
   renderHome();renderContracts();wireArchiveImport();
   if(isAdminUi())renderLibrary();
   if(isAdminUi()||isProjectManagerUi())renderFinancial();
-  if(isProjectManagerUi())renderOutputs();
+  if(isAdminUi()||isProjectManagerUi())renderOutputs();
 }
 function switchView(name){
   if(isSupervisorUi()&&!['home','contracts'].includes(name))name='home';
   if(isProjectManagerUi()&&!['home','contracts','financial','outputs'].includes(name))name='home';
-  if(isAdminUi()&&name==='outputs')name='home';
   document.querySelectorAll('.view').forEach(v=>v.classList.toggle('active',v.dataset.view===name));
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));
-  if(name==='contracts'){if(!isAdminUi())contractListMode='current';renderContracts();wireArchiveImport();}
+  if(name==='contracts'){renderContracts();wireArchiveImport();}
   if(name==='library'&&isAdminUi())renderLibrary();
   if(name==='financial'&&(isAdminUi()||isProjectManagerUi()))renderFinancial();
-  if(name==='outputs'&&isProjectManagerUi())renderOutputs();
+  if(name==='outputs'&&(isAdminUi()||isProjectManagerUi()))renderOutputs();
   window.scrollTo({top:0,behavior:'auto'});
 }
 
@@ -1747,16 +1815,32 @@ function openProjectManagerDetail(id){
 }
 
 function openArchivedDetail(id){
-  const c=getHistoricalContract(id);if(!c||!isAdminUi())return;stopHistoryListener();stopIssuesListener();
+  const c=getHistoricalContract(id);if(!c)return;stopHistoryListener();stopIssuesListener();
+  const p=contractProgress(c),st=effectiveContractStatus(c),ds=dueState(c);
   document.getElementById('detailTitle').textContent=c.customerName;
-  document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}بایگانی • خاتمه‌یافته`;
-  const sorted=[...(c.activities||[])];
+  document.getElementById('detailSubtitle').textContent=`${c.penCode?`کد قلم ${c.penCode} • `:''}${statusLabels[st]||st}`;
+  const sorted=[...(c.activities||[])].sort((a,b)=>(effectiveActivityProgress(c,a)===100)-(effectiveActivityProgress(c,b)===100));
+  if(isProjectManagerUi()){
+    document.getElementById('detailContent').innerHTML=`
+    <div class="detail-summary-v2 manager-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong>${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong>${statusLabels[st]||st}</strong></div></div><div class="timing-strip"><span>بازه قرارداد</span><strong>${escapeHtml(c.contractDate||'—')} تا ${escapeHtml(c.endDate||'—')}</strong></div></div>
+    <section class="panel manager-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">نمایش پیشرفت فعالیت‌ها</span></div><div class="manager-activity-list">${sorted.length?sorted.map(a=>managerActivityRow(c,a)).join(''):'<div class="empty">فعالیتی ثبت نشده است.</div>'}</div></section>
+    ${c.notes?`<section class="panel manager-notes" style="box-shadow:none"><h3>توضیحات قرارداد</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
+    openModal('detailModal');return;
+  }
+  if(isSupervisorUi()){
+    document.getElementById('detailContent').innerHTML=`
+    <div class="detail-summary-v2 supervisor-summary"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت قرارداد</span><strong class="detail-contract-status">${statusLabels[st]||st}</strong></div></div><div class="timing-strip archive-timing-strip"><span>بازه قرارداد</span><strong>${escapeHtml(c.contractDate||'—')} تا ${escapeHtml(c.endDate||'—')}</strong></div></div>
+    <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">درصد را وارد و «ثبت» را بزنید</span></div><div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی برای این قرارداد تعریف نشده است.</div>'}</div></section>
+    ${c.notes?`<section class="panel supervisor-notes" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
+    openModal('detailModal');wireSupervisorDetail(c);return;
+  }
+  if(!isAdminUi())return;
   document.getElementById('detailContent').innerHTML=`
-  <div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong>۱۰۰٪</strong></div><div class="summary-box compact-summary"><span>وضعیت</span><strong>خاتمه‌یافته</strong></div></div><div class="timing-strip archive-timing-strip"><span>بازه قرارداد</span><strong>${escapeHtml(c.contractDate||'—')} تا ${escapeHtml(c.endDate||'—')}</strong></div></div>
-  <div class="detail-toolbar"><button class="primary" id="editArchivedContractBtn">ویرایش قرارداد بایگانی</button></div>
-  <section class="panel manager-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">همه فعالیت‌های بایگانی ۱۰۰٪ هستند</span></div><div class="manager-activity-list">${sorted.length?sorted.map(a=>managerActivityRow(c,{...a,progress:100})).join(''):'<div class="empty">فعالیتی ثبت نشده است.</div>'}</div></section>
+  <div class="detail-summary-v2"><div class="detail-summary-main"><div class="summary-box compact-summary"><span>مبلغ قرارداد</span><strong>${optionalMoney(c.amount)}</strong></div><div class="summary-box compact-summary"><span>پیشرفت کل</span><strong class="detail-total-progress">${toFa(p)}٪</strong></div><div class="summary-box compact-summary"><span>وضعیت</span><strong class="detail-contract-status">${statusLabels[st]||st}</strong></div></div><div class="timing-strip archive-timing-strip"><span>بازه قرارداد</span><strong>${escapeHtml(c.contractDate||'—')} تا ${escapeHtml(c.endDate||'—')}</strong></div></div>
+  <div class="detail-toolbar"><button class="primary" id="editArchivedContractBtn">ویرایش اطلاعات قرارداد</button></div>
+  <section class="panel supervisor-activities-panel" style="box-shadow:none"><div class="section-head"><h3>فعالیت‌ها</h3><span class="muted small">درصد فعالیت‌ها قابل اصلاح است</span></div><div class="supervisor-activity-list">${sorted.length?sorted.map(a=>supervisorActivityRow(c,a)).join(''):'<div class="empty">فعالیتی ثبت نشده است.</div>'}</div></section>
   ${c.notes?`<section class="panel" style="box-shadow:none"><h3>توضیحات</h3><p>${escapeHtml(c.notes)}</p></section>`:''}`;
-  openModal('detailModal');document.getElementById('editArchivedContractBtn')?.addEventListener('click',()=>{closeModal('detailModal');openContractForm(c,'historical')});
+  openModal('detailModal');wireSupervisorDetail(c);document.getElementById('editArchivedContractBtn')?.addEventListener('click',()=>{closeModal('detailModal');openContractForm(c,'historical')});
 }
 
 function openDetail(id){if(isSupervisorUi())return openSupervisorDetail(id);if(isProjectManagerUi())return openProjectManagerDetail(id);return openAdminDetail(id)}
@@ -2144,16 +2228,16 @@ function enterPanelPreview(role){if(!isAdminRole())return;uiPreviewRole=['siteSu
 function exitPanelPreview(){uiPreviewRole='';configureRoleUi();switchView('home');renderAll()}
 // Global events
 document.addEventListener('click',e=>{
-  const nav=e.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='contracts'){dashboardKpiFilter='';if(isAdminUi())contractListMode='current'}switchView(nav.dataset.nav);}
-  const go=e.target.closest('[data-go]');if(go){if(go.dataset.go==='contracts'){dashboardKpiFilter='';if(isAdminUi())contractListMode='current'}switchView(go.dataset.go);}
+  const nav=e.target.closest('[data-nav]');if(nav){if(nav.dataset.nav==='contracts'){dashboardKpiFilter='';contractListMode='current'}switchView(nav.dataset.nav);}
+  const go=e.target.closest('[data-go]');if(go){if(go.dataset.go==='contracts'){dashboardKpiFilter='';contractListMode='current'}switchView(go.dataset.go);}
   const open=e.target.closest('[data-open-contract]');if(open&&!e.target.closest('button'))openDetail(open.dataset.openContract);
   const archiveOpen=e.target.closest('[data-open-archive-contract]');if(archiveOpen&&!e.target.closest('button'))openArchivedDetail(archiveOpen.dataset.openArchiveContract);
   const action=e.target.closest('[data-action]');if(action){e.stopPropagation();const c=getContract(action.dataset.id);if(action.dataset.action==='view')openDetail(c.id);if(action.dataset.action==='edit')openContractForm(c,'current')}
   const archiveAction=e.target.closest('[data-archive-action]');if(archiveAction){e.stopPropagation();const c=getHistoricalContract(archiveAction.dataset.id);if(!c)return;if(archiveAction.dataset.archiveAction==='view')openArchivedDetail(c.id);if(archiveAction.dataset.archiveAction==='edit')openContractForm(c,'historical')}
-  const mode=e.target.closest('[data-contract-mode]');if(mode&&isAdminUi()){contractListMode=mode.dataset.contractMode==='archive'?'archive':'current';dashboardKpiFilter='';clearVisibleContractFilters();renderContracts()}
-  const kpi=e.target.closest('[data-kpi]');if(kpi){const key=kpi.dataset.kpi||'';clearVisibleContractFilters();if(isAdminUi()&&key==='total'){contractListMode='combined';dashboardKpiFilter=''}else if(isAdminUi()&&key==='completed'){contractListMode='completedAll';dashboardKpiFilter=''}else{contractListMode='current';dashboardKpiFilter=key}switchView('contracts');renderContracts()}
+  const mode=e.target.closest('[data-contract-mode]');if(mode){contractListMode=mode.dataset.contractMode==='archive'?'archive':'current';dashboardKpiFilter='';clearVisibleContractFilters();renderContracts()}
+  const kpi=e.target.closest('[data-kpi]');if(kpi){const key=kpi.dataset.kpi||'';clearVisibleContractFilters();if(key==='total'){contractListMode='combined';dashboardKpiFilter=''}else if(key==='completed'){contractListMode='archive';dashboardKpiFilter=''}else{contractListMode='current';dashboardKpiFilter=key}switchView('contracts');renderContracts()}
   const priority=e.target.closest('[data-manager-priority]');if(priority&&isProjectManagerUi()){managerPrioritySelection=managerPrioritySelection===priority.dataset.managerPriority?'':priority.dataset.managerPriority;renderManagerPriorityList()}
-  const report=e.target.closest('[data-report-type]');if(report&&isProjectManagerUi())openReportPreview(report.dataset.reportType);
+  const report=e.target.closest('[data-report-type]');if(report&&(isProjectManagerUi()||isAdminUi()))openReportPreview(report.dataset.reportType);
 });
 document.getElementById('newContractBtn').onclick=()=>{if(isAdminRole()){contractListMode='current';openContractForm(null,'current')}};
 document.querySelectorAll('[data-close-modal]').forEach(b=>b.onclick=()=>closeModal('contractModal'));document.querySelectorAll('[data-close-detail]').forEach(b=>b.onclick=()=>closeModal('detailModal'));document.querySelectorAll('[data-close-prompt]').forEach(b=>b.onclick=()=>closeModal('promptModal'));
@@ -2191,7 +2275,7 @@ document.getElementById('contractForm').onsubmit=async e=>{
         const before={...(getHistoricalContract(id)||{})};
         const saved=await updateHistoricalContractRemote(id,data);
         writeAuditLog('ویرایش قرارداد بایگانی',contractChangeSummary(before,saved).join(' | ')||'اطلاعات قرارداد بایگانی بروزرسانی شد.',{contractId:id,contractName:saved.customerName||'',penCode:saved.penCode||'',kind:'historicalContractEdit'});
-        contractListMode='archive';scheduleContractViewsRender();toast('قرارداد بایگانی ویرایش شد');closeModal('contractModal');switchView('contracts');finishSaving();
+        contractListMode=effectiveContractStatus(saved)==='completed'?'archive':'current';scheduleContractViewsRender();toast('قرارداد بروزرسانی شد');closeModal('contractModal');switchView('contracts');finishSaving();
       }else{
         const before={...(getContract(id)||{})};
         const saved=await updateContractRemote(id,data);

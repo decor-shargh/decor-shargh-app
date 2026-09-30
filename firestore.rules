@@ -157,8 +157,26 @@ service cloud.firestore {
     }
 
     match /historicalContracts/{contractId} {
-      allow read: if isAdmin() || isProjectManager();
-      allow create, update, delete: if isAdmin();
+      allow read: if isAdmin() || isSiteSupervisor() || isProjectManager();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isSiteSupervisor()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'progressByActivity',
+          'status',
+          'completedAt',
+          'updatedAt',
+          'updatedBy',
+          'appVersion'
+        ])
+        && request.resource.data.updatedBy == request.auth.uid
+        && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']) || request.resource.data.progressByActivity is map)
+        && (
+          request.resource.data.status == resource.data.status
+          || request.resource.data.status in ['pendingStart', 'inProgress']
+          || (request.resource.data.status == 'completed' && request.resource.data.diff(resource.data).affectedKeys().hasAny(['progressByActivity']))
+        )
+      );
     }
 
     // Immutable audit log. It can be read by Admin, but nobody can edit or delete it.

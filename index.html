@@ -10,16 +10,16 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Decor Shargh" />
   <title>Decor Shargh | Admin Panel</title>
-  <link rel="manifest" href="manifest.webmanifest?v=171" />
-  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=171" />
-  <link rel="icon" href="icon-192.png?v=171" />
+  <link rel="manifest" href="manifest.webmanifest?v=180" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png?v=180" />
+  <link rel="icon" href="icon-192.png?v=180" />
   <script>try{const t=localStorage.getItem('decorSharghTheme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}</script>
-  <link rel="stylesheet" href="styles.css?v=171" />
+  <link rel="stylesheet" href="styles.css?v=180" />
 </head>
 <body>
   <section id="bootSplash" class="boot-splash" aria-live="polite">
     <div class="boot-brand">
-      <div class="boot-logo"><img src="brand-ui.webp?v=171" alt="Decor Shargh"></div>
+      <div class="boot-logo"><img src="brand-ui.webp?v=180" alt="Decor Shargh"></div>
       <div class="boot-name">Decor Shargh</div>
       <div class="boot-loader" aria-hidden="true"><span></span><span></span><span></span></div>
       <div class="boot-text">در حال آماده‌سازی...</div>
@@ -29,7 +29,7 @@
   <section id="installPrompt" class="install-sheet is-hidden" aria-hidden="true">
     <div class="install-backdrop" data-install-dismiss></div>
     <div class="install-card">
-      <div class="install-icon"><img src="brand-ui.webp?v=171" alt="Decor Shargh"></div>
+      <div class="install-icon"><img src="brand-ui.webp?v=180" alt="Decor Shargh"></div>
       <div class="install-copy">
         <h3>Install Decor Shargh</h3>
         <p id="installText">برای دسترسی سریع‌تر، اپلیکیشن را روی دستگاهت نصب کن.</p>
@@ -47,7 +47,7 @@
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card login-reference-card">
       <div class="login-logo-wrap">
-        <img class="brand-login-logo" src="brand-ui.webp?v=171" alt="لوگوی دکوراسیون شرق">
+        <img class="brand-login-logo" src="brand-ui.webp?v=180" alt="لوگوی دکوراسیون شرق">
       </div>
       <div class="login-heading">
         <h1>Decor Shargh Control Center</h1>
@@ -77,7 +77,7 @@
     <div class="auth-decor auth-decor-one"></div>
     <div class="auth-decor auth-decor-two"></div>
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=171" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=180" alt="لوگوی دکوراسیون شرق"></div>
       <h2>در انتظار تأیید حساب</h2>
       <p id="pendingEmail" class="pending-email"></p>
       <div class="pending-badge">در انتظار تأیید مدیر</div>
@@ -89,7 +89,7 @@
 
   <section id="blockedGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=171" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=180" alt="لوگوی دکوراسیون شرق"></div>
       <h2>دسترسی لغو شده</h2>
       <p class="muted">این حساب در حال حاضر اجازه ورود به سامانه را ندارد.</p>
       <button id="blockedLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -98,7 +98,7 @@
 
   <section id="roleGate" class="auth-gate is-hidden">
     <div class="auth-card pending-card">
-      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=171" alt="لوگوی دکوراسیون شرق"></div>
+      <div class="login-logo-wrap"><img class="brand-pending-logo" src="brand-ui.webp?v=180" alt="لوگوی دکوراسیون شرق"></div>
       <h2 id="roleGateTitle">دسترسی تأیید شد</h2>
       <p id="roleGateCopy" class="muted pending-copy">پنل این نقش هنوز در حال آماده‌سازی است.</p>
       <button id="roleGateLogoutBtn" class="secondary auth-submit" type="button">خروج از حساب</button>
@@ -108,7 +108,7 @@
   <div class="app-shell is-hidden" id="appShell">
     <header class="topbar">
       <div class="top-brand">
-        <img src="brand-ui.webp?v=171" alt="Decor Shargh logo">
+        <img src="brand-ui.webp?v=180" alt="Decor Shargh logo">
         <div class="brand-copy">
           <h1>Decor Shargh</h1>
         </div>
@@ -159,8 +159,8 @@
       <section class="view" data-view="contracts">
         <div class="section-head sticky-title"><h2 id="contractsViewTitle">قراردادها</h2><button class="primary" id="newContractBtn" type="button">+ قرارداد جدید</button></div>
         <div id="contractModeTabs" class="contract-mode-tabs is-hidden">
-          <button type="button" class="contract-mode-btn active" data-contract-mode="current">قراردادهای جاری</button>
-          <button type="button" class="contract-mode-btn" data-contract-mode="archive">بایگانی <span id="archiveCount">۰</span></button>
+          <button type="button" class="contract-mode-btn active" data-contract-mode="current">قراردادهای خاتمه‌نیافته <span id="unfinishedCount">۰</span></button>
+          <button type="button" class="contract-mode-btn" data-contract-mode="archive">قراردادهای خاتمه‌یافته <span id="archiveCount">۰</span></button>
         </div>
         <section id="archiveImportPanel" class="panel archive-import-panel is-hidden">
           <div class="archive-import-head"><div><h3>ورود امن آرشیو قراردادها</h3><p class="muted small">ابتدا Dry Run انجام می‌شود؛ قراردادهای تکراری یا نامعتبر نوشته نمی‌شوند.</p></div><div class="archive-import-actions"><button type="button" class="secondary" id="archiveImportChooseBtn">انتخاب فایل Import</button><button type="button" class="primary" id="archiveImportConfirmBtn" disabled>تأیید و ورود به بایگانی</button><input id="archiveImportFile" type="file" accept="application/json,.json" hidden></div></div>
@@ -243,11 +243,20 @@
           </div>
         </section>
         <section class="panel output-menu-panel">
+          <div class="section-head"><h3>خروجی‌های مدیریتی</h3></div>
           <div class="output-report-grid">
             <button type="button" class="output-report-btn critical" data-report-type="critical"><span>قراردادهای بحرانی</span><strong>PDF</strong></button>
             <button type="button" class="output-report-btn near" data-report-type="near"><span>نزدیک سررسید</span><strong>PDF</strong></button>
             <button type="button" class="output-report-btn issues" data-report-type="issues"><span>مشکلات باز</span><strong>PDF</strong></button>
             <button type="button" class="output-report-btn summary" data-report-type="summary"><span>خلاصه وضعیت همه قراردادها</span><strong>PDF</strong></button>
+          </div>
+        </section>
+        <section class="panel output-menu-panel financial-output-menu">
+          <div class="section-head"><div><h3>خروجی‌های مالی</h3><p class="muted small">قراردادهای فسخ‌شده در خروجی مالی محاسبه نمی‌شوند.</p></div></div>
+          <div class="output-report-grid financial-output-grid">
+            <button type="button" class="output-report-btn financial-summary" data-report-type="financialSummary"><span>گزارش مالی خلاصه</span><strong>PDF</strong></button>
+            <button type="button" class="output-report-btn financial-monthly" data-report-type="financialMonthly"><span>گزارش مالی ماهانه</span><strong>PDF</strong></button>
+            <button type="button" class="output-report-btn financial-details" data-report-type="financialDetails"><span>ریز قراردادهای مالی</span><strong>PDF</strong></button>
           </div>
         </section>
         <section class="panel report-preview-panel is-hidden" id="reportPreviewPanel">
@@ -301,7 +310,6 @@
       <button class="nav-item nav-home active" data-nav="home"><span>⌂</span><small>خانه</small></button>
       <button class="nav-item nav-contracts" data-nav="contracts"><span>▤</span><small>قراردادها</small></button>
       <button class="nav-item nav-financial" data-nav="financial"><span>◫</span><small>گزارش مالی</small></button>
-      <button class="nav-item nav-library" data-nav="library"><span>▦</span><small>کتابخانه</small></button>
       <button class="nav-item nav-outputs" data-nav="outputs"><span>⇩</span><small>خروجی</small></button>
       <button class="nav-item nav-more" data-nav="more"><span>•••</span><small>بیشتر</small></button>
     </nav>
@@ -442,6 +450,6 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
-  <script src="app.js?v=171"></script>
+  <script src="app.js?v=180"></script>
 </body>
 </html>
